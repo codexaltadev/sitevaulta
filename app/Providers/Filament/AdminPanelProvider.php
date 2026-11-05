@@ -1,0 +1,76 @@
+<?php
+
+namespace App\Providers\Filament;
+
+use App\Services\Settings\SystemSettingsService;
+use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Enums\ThemeMode;
+use Filament\Http\Middleware\Authenticate;
+use Filament\Http\Middleware\AuthenticateSession;
+use Filament\Http\Middleware\DisableBladeIconComponents;
+use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Pages\Dashboard;
+use Filament\Panel;
+use Filament\PanelProvider;
+use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
+use Filament\Widgets\AccountWidget;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Session\Middleware\StartSession;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
+
+class AdminPanelProvider extends PanelProvider
+{
+    public function panel(Panel $panel): Panel
+    {
+        return $panel
+            ->id('admin')
+            ->path('admin')
+            ->login()
+            ->brandName(fn () => (SystemSettingsService::get('general', 'app_name', 'SiteVaulta').' Admin'))
+            ->brandLogo(fn () => SystemSettingsService::get('general', 'logo_light_url') ?: null)
+            ->darkModeBrandLogo(fn () => SystemSettingsService::get('general', 'logo_dark_url') ?: null)
+            ->favicon(fn () => SystemSettingsService::get('general', 'favicon_url') ?: null)
+            // Dark & Light mode: users can switch Light / Dark / System from the user menu.
+            // Preference is stored in localStorage key `filament:theme:mode` (shared with public pages).
+            ->darkMode(true)
+            ->themeSwitcher(true)
+            ->defaultThemeMode(ThemeMode::System)
+            ->renderHook(PanelsRenderHook::HEAD_END, fn () => view('partials.filament-theme-variables'))
+            ->colors([
+                'primary' => Color::Indigo,
+                'success' => Color::Emerald,
+                'warning' => Color::Amber,
+                'danger' => Color::Rose,
+            ])
+            ->discoverResources(in: app_path('Filament/Admin/Resources'), for: 'App\\Filament\\Admin\\Resources')
+            ->discoverPages(in: app_path('Filament/Admin/Pages'), for: 'App\\Filament\\Admin\\Pages')
+            ->pages([
+                Dashboard::class,
+            ])
+            ->discoverWidgets(in: app_path('Filament/Admin/Widgets'), for: 'App\\Filament\\Admin\\Widgets')
+            ->widgets([
+                AccountWidget::class,
+            ])
+            ->plugins([
+                FilamentShieldPlugin::make(),
+            ])
+            ->middleware([
+                EncryptCookies::class,
+                AddQueuedCookiesToResponse::class,
+                StartSession::class,
+                AuthenticateSession::class,
+                ShareErrorsFromSession::class,
+                VerifyCsrfToken::class,
+                SubstituteBindings::class,
+                DisableBladeIconComponents::class,
+                DispatchServingFilamentEvent::class,
+            ])
+            ->authMiddleware([
+                Authenticate::class,
+            ]);
+    }
+}
