@@ -220,4 +220,33 @@ class Step18RemainingSpecFeaturesTest extends TestCase
         $this->assertTrue(class_exists(PlanForm::class));
         $this->assertTrue(class_exists(PlansTable::class));
     }
+
+    public function test_filament_v5_resources_and_separated_schemas_and_tables_are_discovered(): void
+    {
+        $appResources = \Filament\Facades\Filament::getPanel('app')->getResources();
+        $adminResources = \Filament\Facades\Filament::getPanel('admin')->getResources();
+
+        $this->assertContains(\App\Filament\App\Resources\Websites\WebsiteResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\ServerConnections\ServerConnectionResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\StorageConnections\StorageConnectionResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\BackupTemplates\BackupTemplateResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\BackupPolicies\BackupPolicyResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\BackupRuns\BackupRunResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\NotificationChannels\NotificationChannelResource::class, $appResources);
+        $this->assertContains(\App\Filament\App\Resources\ClientReports\ClientReportResource::class, $appResources);
+
+        $this->assertContains(\App\Filament\Admin\Resources\Workspaces\WorkspaceResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\Plans\PlanResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\Coupons\CouponResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\Payments\PaymentResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\Users\UserResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\BackupRunAdmins\BackupRunAdminResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\EmailTemplates\EmailTemplateResource::class, $adminResources);
+        $this->assertContains(\App\Filament\Admin\Resources\AuditLogs\AuditLogResource::class, $adminResources);
+
+        $this->assertTrue(class_exists(\App\Filament\App\Resources\Websites\Schemas\WebsiteForm::class));
+        $this->assertTrue(class_exists(\App\Filament\App\Resources\Websites\Tables\WebsitesTable::class));
+        $this->assertTrue(class_exists(\App\Filament\Admin\Resources\Plans\Schemas\PlanForm::class));
+        $this->assertTrue(class_exists(\App\Filament\Admin\Resources\Plans\Tables\PlansTable::class));
+    }
 }

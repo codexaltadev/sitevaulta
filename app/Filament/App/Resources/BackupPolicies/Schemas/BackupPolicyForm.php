@@ -149,10 +149,12 @@ class BackupPolicyForm
                                             ->options(BackupScope::options())
                                             ->default(BackupScope::FullStack->value)
                                             ->live()
-                                            ->afterStateUpdated(function (?string $state, callable $set): void {
+                                            ->afterStateUpdated(function (?string $state, Get $get, callable $set) use ($defaultExcludes): void {
                                                 if ($state === BackupScope::DatabaseOnly->value) {
                                                     $set('strategy', BackupStrategy::FullOnly->value);
                                                     $set('full_reset_every_n', 1);
+                                                } elseif (empty($get('exclude_paths'))) {
+                                                    $set('exclude_paths', $defaultExcludes);
                                                 }
                                             })
                                             ->required(),
