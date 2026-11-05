@@ -3,7 +3,27 @@
 namespace Tests\Feature;
 
 use App\Filament\Admin\Pages\ManageSystemSettings;
+use App\Filament\Admin\Resources\AuditLogs\AuditLogResource;
+use App\Filament\Admin\Resources\BackupRunAdmins\BackupRunAdminResource;
+use App\Filament\Admin\Resources\Coupons\CouponResource;
+use App\Filament\Admin\Resources\EmailTemplates\EmailTemplateResource;
+use App\Filament\Admin\Resources\Payments\PaymentResource;
+use App\Filament\Admin\Resources\Plans\PlanResource;
+use App\Filament\Admin\Resources\Plans\Schemas\PlanForm;
+use App\Filament\Admin\Resources\Plans\Tables\PlansTable;
+use App\Filament\Admin\Resources\Users\UserResource;
+use App\Filament\Admin\Resources\Workspaces\WorkspaceResource;
 use App\Filament\App\Pages\Tenancy\EditWorkspaceSettings;
+use App\Filament\App\Resources\BackupPolicies\BackupPolicyResource;
+use App\Filament\App\Resources\BackupRuns\BackupRunResource;
+use App\Filament\App\Resources\BackupTemplates\BackupTemplateResource;
+use App\Filament\App\Resources\ClientReports\ClientReportResource;
+use App\Filament\App\Resources\NotificationChannels\NotificationChannelResource;
+use App\Filament\App\Resources\ServerConnections\ServerConnectionResource;
+use App\Filament\App\Resources\StorageConnections\StorageConnectionResource;
+use App\Filament\App\Resources\Websites\Schemas\WebsiteForm;
+use App\Filament\App\Resources\Websites\Tables\WebsitesTable;
+use App\Filament\App\Resources\Websites\WebsiteResource;
 use App\Jobs\Backup\ExecuteBackupRunJob;
 use App\Models\AuditLog;
 use App\Models\User;
@@ -170,5 +190,34 @@ class Step18RemainingSpecFeaturesTest extends TestCase
         // Quiet hours active (00:00 to 23:59): non-critical success alert is muted, but critical failure alert is NOT muted
         $this->assertTrue(WorkspaceAlertDispatcher::isQuietHoursMuted($workspace, 'backup_succeeded'));
         $this->assertFalse(WorkspaceAlertDispatcher::isQuietHoursMuted($workspace, 'backup_failed'));
+    }
+
+    public function test_filament_v5_resources_and_separated_schemas_and_tables_are_discovered(): void
+    {
+        $appResources = Filament::getPanel('app')->getResources();
+        $adminResources = Filament::getPanel('admin')->getResources();
+
+        $this->assertContains(WebsiteResource::class, $appResources);
+        $this->assertContains(ServerConnectionResource::class, $appResources);
+        $this->assertContains(StorageConnectionResource::class, $appResources);
+        $this->assertContains(BackupTemplateResource::class, $appResources);
+        $this->assertContains(BackupPolicyResource::class, $appResources);
+        $this->assertContains(BackupRunResource::class, $appResources);
+        $this->assertContains(NotificationChannelResource::class, $appResources);
+        $this->assertContains(ClientReportResource::class, $appResources);
+
+        $this->assertContains(WorkspaceResource::class, $adminResources);
+        $this->assertContains(PlanResource::class, $adminResources);
+        $this->assertContains(CouponResource::class, $adminResources);
+        $this->assertContains(PaymentResource::class, $adminResources);
+        $this->assertContains(UserResource::class, $adminResources);
+        $this->assertContains(BackupRunAdminResource::class, $adminResources);
+        $this->assertContains(EmailTemplateResource::class, $adminResources);
+        $this->assertContains(AuditLogResource::class, $adminResources);
+
+        $this->assertTrue(class_exists(WebsiteForm::class));
+        $this->assertTrue(class_exists(WebsitesTable::class));
+        $this->assertTrue(class_exists(PlanForm::class));
+        $this->assertTrue(class_exists(PlansTable::class));
     }
 }

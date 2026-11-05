@@ -3,6 +3,7 @@
 namespace App\Filament\App\Widgets;
 
 use App\Enums\BackupRunStatus;
+use App\Enums\SubscriptionStatus;
 use App\Enums\WebsiteVerificationStatus;
 use App\Models\Workspace;
 use Filament\Facades\Filament;
@@ -30,9 +31,9 @@ class WorkspaceOverviewWidget extends BaseWidget
         $planLabel = $sub?->plan?->name ?? 'Unassigned';
         $validityDesc = $sub ? $sub->getValidityDescription() : 'No active subscription';
         $subColor = match ($sub?->status) {
-            \App\Enums\SubscriptionStatus::Active => $sub->isExpiringSoon(7) ? 'warning' : 'success',
-            \App\Enums\SubscriptionStatus::Trialing => 'info',
-            \App\Enums\SubscriptionStatus::PastDue => 'warning',
+            SubscriptionStatus::Active => $sub->isExpiringSoon(7) ? 'warning' : 'success',
+            SubscriptionStatus::Trialing => 'info',
+            SubscriptionStatus::PastDue => 'warning',
             default => 'danger',
         };
 
@@ -55,4 +56,3 @@ class WorkspaceOverviewWidget extends BaseWidget
         ];
     }
 }
-

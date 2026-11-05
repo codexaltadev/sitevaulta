@@ -37,10 +37,9 @@ class AdminExecutiveStatsWidget extends BaseWidget
                 ->description('SHA-256 verified archives')
                 ->color('info'),
 
-            Stat::make('Collected Revenue', '৳' . number_format($bdtRevenue, 0) . ' / $' . number_format($usdRevenue, 0))
+            Stat::make('Collected Revenue', '৳'.number_format($bdtRevenue, 0).' / $'.number_format($usdRevenue, 0))
                 ->description('SSLCOMMERZ (BDT) + Stripe/PayPal (USD)')
                 ->color('warning'),
         ];
     }
 }
-

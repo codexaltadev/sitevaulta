@@ -11,7 +11,7 @@ class StorageSavingsRadarWidget extends Widget
 {
     protected string $view = 'filament.app.widgets.storage-savings-radar-widget';
 
-    protected int | string | array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 'full';
 
     protected static ?int $sort = 3;
 
@@ -28,7 +28,7 @@ class StorageSavingsRadarWidget extends Widget
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];
         $pow = min((int) floor(log($bytes, 1024)), count($units) - 1);
 
-        return round($bytes / (1024 ** $pow), 2) . ' ' . $units[$pow];
+        return round($bytes / (1024 ** $pow), 2).' '.$units[$pow];
     }
 
     protected function getViewData(): array

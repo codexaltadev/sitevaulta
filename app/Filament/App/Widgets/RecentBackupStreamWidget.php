@@ -2,6 +2,7 @@
 
 namespace App\Filament\App\Widgets;
 
+use App\Enums\BackupRunStatus;
 use App\Models\Workspace;
 use Filament\Facades\Filament;
 use Filament\Widgets\Widget;
@@ -10,7 +11,7 @@ class RecentBackupStreamWidget extends Widget
 {
     protected string $view = 'filament.app.widgets.recent-backup-stream-widget';
 
-    protected int | string | array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 'full';
 
     protected static ?int $sort = 4;
 
@@ -26,12 +27,12 @@ class RecentBackupStreamWidget extends Widget
 
         $hasActive = $workspace->backupRuns()
             ->whereIn('status', [
-                \App\Enums\BackupRunStatus::Queued,
-                \App\Enums\BackupRunStatus::Connecting,
-                \App\Enums\BackupRunStatus::Extracting,
-                \App\Enums\BackupRunStatus::Packaging,
-                \App\Enums\BackupRunStatus::Uploading,
-                \App\Enums\BackupRunStatus::Verifying,
+                BackupRunStatus::Queued,
+                BackupRunStatus::Connecting,
+                BackupRunStatus::Extracting,
+                BackupRunStatus::Packaging,
+                BackupRunStatus::Uploading,
+                BackupRunStatus::Verifying,
             ])
             ->exists();
 

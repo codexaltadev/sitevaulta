@@ -4,11 +4,15 @@ namespace Tests\Feature;
 
 use App\Enums\DatabaseDriver;
 use App\Enums\FileProtocol;
+use App\Filament\App\Resources\ServerConnections\Pages\EditServerConnection;
 use App\Models\ServerConnection;
 use App\Models\User;
 use App\Models\Workspace;
 use Database\Seeders\DemoWorkspaceSeeder;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class ServerConnectionEditTest extends TestCase
@@ -35,7 +39,7 @@ class ServerConnectionEditTest extends TestCase
 
         // Request Edit page
         $response = $this->actingAs($user)
-            ->get('/app/' . $workspace->slug . '/server-connections/' . $conn->id . '/edit');
+            ->get('/app/'.$workspace->slug.'/server-connections/'.$conn->id.'/edit');
 
         file_put_contents('/tmp/edit_page.html', $response->getContent());
 
@@ -83,7 +87,7 @@ class ServerConnectionEditTest extends TestCase
 
         // Edit page must show all saved credentials
         $response = $this->actingAs($user)
-            ->get('/app/' . $workspace->slug . '/server-connections/' . $conn->id . '/edit');
+            ->get('/app/'.$workspace->slug.'/server-connections/'.$conn->id.'/edit');
 
         $response->assertStatus(200);
         $response->assertSee('demofaculty.daffodilvarsity.edu.bd');
@@ -124,12 +128,12 @@ class ServerConnectionEditTest extends TestCase
             ],
         ]);
 
-        \Illuminate\Support\Facades\Auth::login($user);
-        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('app'));
-        \Filament\Facades\Filament::setTenant($workspace);
+        Auth::login($user);
+        Filament::setCurrentPanel(Filament::getPanel('app'));
+        Filament::setTenant($workspace);
 
-        \Livewire\Livewire::actingAs($user)
-            ->test(\App\Filament\App\Resources\ServerConnectionResource\Pages\EditServerConnection::class, [
+        Livewire::actingAs($user)
+            ->test(EditServerConnection::class, [
                 'record' => $conn->id,
             ])
             ->assertSchemaStateSet([

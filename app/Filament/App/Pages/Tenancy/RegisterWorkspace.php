@@ -34,7 +34,7 @@ class RegisterWorkspace extends RegisterTenant
                     ->live(onBlur: true)
                     ->afterStateUpdated(function (?string $state, callable $set): void {
                         if ($state) {
-                            $set('slug', Str::slug($state) . '-' . Str::lower(Str::random(4)));
+                            $set('slug', Str::slug($state).'-'.Str::lower(Str::random(4)));
                         }
                     }),
 
@@ -99,4 +99,3 @@ class RegisterWorkspace extends RegisterTenant
         return $workspace;
     }
 }
-

@@ -27,9 +27,9 @@ class ManageTeamMembers extends Page implements HasTable
 {
     use InteractsWithTable;
 
-    protected static string | BackedEnum | null $navigationIcon = Heroicon::OutlinedUsers;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
 
-    protected static string | UnitEnum | null $navigationGroup = 'Workspace & Billing';
+    protected static string|UnitEnum|null $navigationGroup = 'Workspace & Billing';
 
     protected static ?string $navigationLabel = 'Team Members & Roles';
 

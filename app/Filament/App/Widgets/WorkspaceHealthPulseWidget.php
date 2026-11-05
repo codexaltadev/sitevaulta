@@ -4,8 +4,6 @@ namespace App\Filament\App\Widgets;
 
 use App\Enums\BackupRunStatus;
 use App\Enums\WebsiteVerificationStatus;
-use App\Models\BackupPolicy;
-use App\Models\BackupRun;
 use App\Models\Workspace;
 use Database\Seeders\DemoWorkspaceSeeder;
 use Filament\Facades\Filament;
@@ -16,7 +14,7 @@ class WorkspaceHealthPulseWidget extends Widget
 {
     protected string $view = 'filament.app.widgets.workspace-health-pulse-widget';
 
-    protected int | string | array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 'full';
 
     protected static ?int $sort = 1;
 
