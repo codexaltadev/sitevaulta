@@ -29,6 +29,9 @@ class Workspace extends Model implements HasName
         'referral_code',
         'referred_by_workspace_id',
         'referral_rewarded_at',
+        'report_brand_name',
+        'report_brand_logo_url',
+        'report_footer_note',
         'whitelabel_config',
         'is_suspended',
     ];

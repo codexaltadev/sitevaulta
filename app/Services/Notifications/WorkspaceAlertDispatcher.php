@@ -11,6 +11,7 @@ use App\Models\Workspace;
 use App\Services\Billing\EmailWalletService;
 use App\Services\Settings\SystemSettingsService;
 use App\Services\Settings\WorkspaceSettingsService;
+use Filament\Notifications\Notification;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,44 @@ use Illuminate\Support\Facades\Mail;
 
 class WorkspaceAlertDispatcher
 {
+    /**
+     * Sends a persistent Filament Database Notification to the Workspace Owner and all Workspace Members
+     * so it appears in the top-bar Notification Bell drawer in /app and /admin.
+     */
+    public static function sendDatabaseNotificationToWorkspace(
+        Workspace $workspace,
+        string $title,
+        string $body,
+        string $status = 'info'
+    ): void {
+        try {
+            $workspace->loadMissing(['owner', 'members']);
+            $recipients = collect($workspace->members);
+            if ($workspace->owner) {
+                $recipients->push($workspace->owner);
+            }
+            $recipients = $recipients->filter()->unique('id')->values();
+
+            if ($recipients->isEmpty()) {
+                return;
+            }
+
+            $notification = Notification::make()
+                ->title($title)
+                ->body($body);
+
+            match ($status) {
+                'success' => $notification->success(),
+                'danger' => $notification->danger(),
+                'warning' => $notification->warning(),
+                default => $notification->info(),
+            };
+
+            $notification->sendToDatabase($recipients);
+        } catch (\Throwable $e) {
+            Log::warning("Database notification dispatch error for workspace [{$workspace->slug}]: ".$e->getMessage());
+        }
+    }
     public static function dispatch(Workspace $workspace, string $eventCode, array $variables = []): void
     {
         if (self::isQuietHoursMuted($workspace, $eventCode)) {
@@ -170,6 +209,18 @@ class WorkspaceAlertDispatcher
             if (! $workspace) {
                 return false;
             }
+
+            // Always persist to the in-app Database Notification bell drawer
+            self::sendDatabaseNotificationToWorkspace(
+                workspace: $workspace,
+                title: $isSuccess
+                    ? "✅ Backup Completed: {$websiteName} ({$domain})"
+                    : "🚨 Backup Failed: {$websiteName} ({$domain})",
+                body: $isSuccess
+                    ? "Policy '{$policy->name}' (Run #{$run->id}) completed and verified ({$variables['archive_size']})."
+                    : "Policy '{$policy->name}' (Run #{$run->id}) failed: {$variables['error_message']}",
+                status: $isSuccess ? 'success' : 'danger'
+            );
 
             $preferredMode = self::resolveEmailProviderMode($workspace, $policy, $run);
 
@@ -350,6 +401,18 @@ class WorkspaceAlertDispatcher
             $eventLabel = 'website_recovered';
         }
 
+        // Always persist to the in-app Database Notification bell drawer
+        self::sendDatabaseNotificationToWorkspace(
+            workspace: $workspace,
+            title: $isDown
+                ? "🔴 DOWNTIME ALERT: {$website->name} ({$website->domain})"
+                : "🟢 RECOVERED: {$website->name} ({$website->domain}) is Back Online!",
+            body: $isDown
+                ? "Reason: {$reason}"
+                : "Website & Server responded HTTP ".($httpStatus ?: 200)." ({$responseTimeMs} ms).",
+            status: $isDown ? 'danger' : 'success'
+        );
+
         $result = self::dispatchEmailWithFallback(
             workspace: $workspace,
             recipientEmail: $recipientEmail,
@@ -363,6 +426,155 @@ class WorkspaceAlertDispatcher
                 'domain' => $website->domain,
                 'event' => $eventLabel,
                 'reason' => $reason,
+            ]
+        );
+
+        return $result['sent'];
+    }
+
+    public static function sendWebsiteMalwareAlertEmail(Website $website, array $reportPayload): bool
+    {
+        $workspace = $website->workspace;
+        if (! $workspace || ! ($website->notify_on_malware_detected ?? true)) {
+            return false;
+        }
+
+        $recipientEmail = trim((string) ($website->uptime_alert_email ?: $workspace->owner?->email));
+        if ($recipientEmail === '') {
+            return false;
+        }
+
+        $findings = $reportPayload['findings'] ?? [];
+        $criticalFindings = collect($findings)->whereIn('severity', ['CRITICAL', 'HIGH'])->values();
+        if ($criticalFindings->isEmpty()) {
+            return false;
+        }
+
+        $count = $criticalFindings->count();
+        $subject = "[SiteVaulta] 🛡️ SECURITY ALERT: {$count} Suspicious File(s) / Risk(s) Detected on {$website->name} ({$website->domain})";
+
+        $listHtml = '';
+        foreach ($criticalFindings->take(10) as $item) {
+            $listHtml .= sprintf(
+                '<li style="margin-bottom:8px;">'
+                .'<strong style="color:#dc2626;">[%s] %s</strong><br>'
+                .'<span><strong>Exact File / Path:</strong> <code>%s</code>%s</span><br>'
+                .'<span><strong>Evidence:</strong> <code>%s</code></span>'
+                .'</li>',
+                e((string) ($item['severity'] ?? 'HIGH')),
+                e((string) ($item['label'] ?? 'Suspicious Script')),
+                e((string) ($item['location'] ?? 'N/A')),
+                ! empty($item['line']) ? ' (Line '.(int) $item['line'].')' : '',
+                e((string) ($item['evidence'] ?? ''))
+            );
+        }
+
+        $htmlBody = sprintf(
+            '<p><strong>🛡️ Read-Only Security &amp; Malware Diagnostic Report for %s (<code>%s</code>):</strong></p>'
+            .'<p>Our 100%% Read-Only Security Scanner detected <strong>%d critical/high-risk file(s) or exposure(s)</strong> during inspection:</p>'
+            .'<ul>%s</ul>'
+            .'<p style="padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9;font-size:13px;">'
+            .'<strong>🔒 100%% Read-Only Guarantee:</strong> SiteVaulta <strong>never deletes or modifies</strong> any file or data on your live server. Please log in to your server manually to inspect the file path(s) listed above.'
+            .'</p>',
+            e($website->name),
+            e($website->domain),
+            $count,
+            $listHtml
+        );
+
+        $firstLocation = (string) ($criticalFindings->first()['location'] ?? '');
+
+        // Always persist to the in-app Database Notification bell drawer
+        self::sendDatabaseNotificationToWorkspace(
+            workspace: $workspace,
+            title: "🛡️ SECURITY ALERT: {$count} Threat(s) on {$website->name} ({$website->domain})",
+            body: "100% Read-Only Scan detected {$count} critical/high-risk file(s) (e.g. {$firstLocation}). Click Website 'View' to inspect all file paths.",
+            status: 'danger'
+        );
+
+        $result = self::dispatchEmailWithFallback(
+            workspace: $workspace,
+            recipientEmail: $recipientEmail,
+            subject: $subject,
+            htmlBody: $htmlBody,
+            preferredMode: $website->uptime_email_provider_mode ?: 'workspace_default',
+            ledgerDescription: "Security & Malware Diagnostic Alert sent to {$recipientEmail} for {$website->domain}",
+            reference: $website,
+            metadata: [
+                'website_id' => $website->id,
+                'domain' => $website->domain,
+                'threats_count' => $count,
+            ]
+        );
+
+        return $result['sent'];
+    }
+
+    public static function sendWebsiteSslExpiryAlertEmail(
+        Website $website,
+        int $daysRemaining,
+        string $issuer,
+        ?string $expiresAtFormatted
+    ): bool {
+        $workspace = $website->workspace;
+        if (! $workspace || ! ($website->notify_on_ssl_expiry ?? true)) {
+            return false;
+        }
+
+        $recipientEmail = trim((string) ($website->uptime_alert_email ?: $workspace->owner?->email));
+        if ($recipientEmail === '') {
+            return false;
+        }
+
+        $isExpired = $daysRemaining <= 0;
+        $title = $isExpired
+            ? "🔴 SSL CERTIFICATE EXPIRED: {$website->name} ({$website->domain})"
+            : "⚠️ SSL Expiry Reminder: {$website->name} ({$website->domain}) expires in {$daysRemaining} day(s)";
+
+        $body = $isExpired
+            ? "Your HTTPS SSL certificate (Issuer: {$issuer}) for {$website->domain} has EXPIRED ({$expiresAtFormatted}). Renew immediately so visitors do not see security warnings."
+            : "Your HTTPS SSL certificate (Issuer: {$issuer}) for {$website->domain} will expire on {$expiresAtFormatted} ({$daysRemaining} day(s) remaining). Please verify auto-renewal.";
+
+        // Always persist to the in-app Database Notification bell drawer
+        self::sendDatabaseNotificationToWorkspace(
+            workspace: $workspace,
+            title: $title,
+            body: $body,
+            status: $isExpired ? 'danger' : 'warning'
+        );
+
+        $subject = "[SiteVaulta] {$title}";
+        $htmlBody = sprintf(
+            '<p><strong>%s</strong></p>'
+            .'<ul>'
+            .'<li><strong>Website:</strong> %s (<code>%s</code>)</li>'
+            .'<li><strong>SSL Issuer Authority:</strong> %s</li>'
+            .'<li><strong>Expiration Date:</strong> %s</li>'
+            .'<li><strong>Days Remaining:</strong> <strong style="color:%s;">%d day(s)</strong></li>'
+            .'</ul>'
+            .'<p>%s</p>',
+            e($title),
+            e($website->name),
+            e($website->domain),
+            e($issuer),
+            e($expiresAtFormatted ?: 'Unknown'),
+            $isExpired ? '#dc2626' : '#d97706',
+            $daysRemaining,
+            e($body)
+        );
+
+        $result = self::dispatchEmailWithFallback(
+            workspace: $workspace,
+            recipientEmail: $recipientEmail,
+            subject: $subject,
+            htmlBody: $htmlBody,
+            preferredMode: $website->uptime_email_provider_mode ?: 'workspace_default',
+            ledgerDescription: "SSL Expiry Alert ({$daysRemaining}d left) sent to {$recipientEmail} for {$website->domain}",
+            reference: $website,
+            metadata: [
+                'website_id' => $website->id,
+                'domain' => $website->domain,
+                'ssl_days_remaining' => $daysRemaining,
             ]
         );
 

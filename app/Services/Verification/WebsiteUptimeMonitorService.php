@@ -25,7 +25,8 @@ class WebsiteUptimeMonitorService
     public static function checkWebsiteLiveStatus(
         Website $website,
         ?bool $forceSimulateOnline = null,
-        ?string $forceSimulateReason = null
+        ?string $forceSimulateReason = null,
+        ?int $forceSimulateSslDaysRemaining = null
     ): array {
         $website->loadMissing(['workspace.owner', 'serverConnections']);
         $previousStatus = $website->uptime_status ?: 'unknown';
@@ -139,16 +140,72 @@ class WebsiteUptimeMonitorService
         $newUptimeStatus = $isOverallOnline ? 'online' : 'down';
         $reasonString = $isOverallOnline ? null : implode(' | ', array_unique($downReasons));
 
+        // 2B. Inspect SSL Certificate Expiry & Persist SSL Telemetry
+        $sslStatus = 'none';
+        $sslIssuer = null;
+        $sslExpiresAt = null;
+        $sslDaysRemaining = null;
+        $sslExpiresFormatted = null;
+
+        if ($forceSimulateSslDaysRemaining !== null) {
+            $sslDaysRemaining = $forceSimulateSslDaysRemaining;
+            $sslIssuer = "Let's Encrypt";
+            $sslExpiresAt = now()->utc()->addDays($forceSimulateSslDaysRemaining);
+            $sslExpiresFormatted = $sslExpiresAt->format('M d, Y');
+            $sslStatus = $sslDaysRemaining <= 0
+                ? 'expired'
+                : ($sslDaysRemaining <= ($website->ssl_expiry_warning_days ?: 14) ? 'expiring_soon' : 'valid');
+        } elseif ($httpOnline && ! self::isReservedOrFakeHost($cleanHost)) {
+            $sslData = self::inspectSslCertificate($cleanHost);
+            if ($sslData['days_remaining'] !== null) {
+                $sslDaysRemaining = (int) $sslData['days_remaining'];
+                $sslIssuer = $sslData['issuer'] ?: 'Unknown CA';
+                $sslExpiresFormatted = $sslData['expires_at'];
+                $sslExpiresAt = $sslData['expires_at'] ? Carbon::parse($sslData['expires_at']) : null;
+                $sslStatus = $sslDaysRemaining <= 0
+                    ? 'expired'
+                    : ($sslDaysRemaining <= ($website->ssl_expiry_warning_days ?: 14) ? 'expiring_soon' : 'valid');
+            }
+        }
+
         $website->update([
             'uptime_status' => $newUptimeStatus,
             'last_http_status_code' => $httpStatus,
             'last_response_time_ms' => $responseTimeMs,
             'server_live_status' => $serverStatus,
+            'ssl_status' => $sslStatus,
+            'ssl_issuer' => $sslIssuer,
+            'ssl_expires_at' => $sslExpiresAt,
+            'ssl_days_remaining' => $sslDaysRemaining,
             'last_uptime_checked_at' => now()->utc(),
             'last_down_reason' => $reasonString,
         ]);
 
         $emailNotified = false;
+        $sslExpiryAlertSent = false;
+
+        // 2C. Send Automatic SSL Certificate Expiry Reminder if expiring within threshold (e.g. <= 14 days)
+        $sslWarningThreshold = (int) ($website->ssl_expiry_warning_days ?: 14);
+        if ($sslDaysRemaining !== null
+            && $sslDaysRemaining <= $sslWarningThreshold
+            && ($website->notify_on_ssl_expiry ?? true)
+        ) {
+            $shouldNotifySsl = ($website->last_ssl_expiry_notified_at === null)
+                || $website->last_ssl_expiry_notified_at->diffInHours(now()->utc()) >= 24;
+
+            if ($shouldNotifySsl) {
+                $sslExpiryAlertSent = WorkspaceAlertDispatcher::sendWebsiteSslExpiryAlertEmail(
+                    website: $website,
+                    daysRemaining: $sslDaysRemaining,
+                    issuer: (string) ($sslIssuer ?: 'Unknown CA'),
+                    expiresAtFormatted: $sslExpiresFormatted
+                );
+
+                if ($sslExpiryAlertSent) {
+                    $website->update(['last_ssl_expiry_notified_at' => now()->utc()]);
+                }
+            }
+        }
 
         // 3. Notify Owner if Website or Server went DOWN
         if (! $isOverallOnline && ($website->uptime_monitoring_enabled ?? true)) {
@@ -234,6 +291,9 @@ class WebsiteUptimeMonitorService
             'http_status' => $httpStatus,
             'response_time_ms' => $responseTimeMs,
             'server_status' => $serverStatus,
+            'ssl_status' => $sslStatus,
+            'ssl_days_remaining' => $sslDaysRemaining,
+            'ssl_expiry_alert_sent' => $sslExpiryAlertSent,
             'message' => $summaryMsg,
             'email_notified' => $emailNotified,
             'alert_sent' => $emailNotified,
@@ -428,16 +488,20 @@ class WebsiteUptimeMonitorService
         $resolvedIps = $isFakeDomain ? [] : (@gethostbynamel($cleanHost) ?: []);
         $primaryIp = $resolvedIps[0] ?? null;
 
-        // 2. SSL Certificate Inspection (if DNS resolves)
+        // 2. SSL Certificate Inspection (if DNS resolves, or fallback to persisted SSL telemetry on $website)
         $sslInfo = [
             'valid' => false,
-            'issuer' => 'N/A',
+            'issuer' => $website->ssl_issuer ?: 'N/A',
             'subject' => $cleanHost,
-            'expires_at' => null,
-            'days_remaining' => null,
-            'protocol' => 'None',
-            'status_label' => '❌ No SSL / Domain Unreachable',
-            'badge_color' => '#ef4444',
+            'expires_at' => $website->ssl_expires_at ? $website->ssl_expires_at->format('M d, Y') : null,
+            'days_remaining' => $website->ssl_days_remaining,
+            'protocol' => $website->ssl_days_remaining !== null ? 'HTTPS / TLS' : 'None',
+            'status_label' => $website->ssl_days_remaining !== null
+                ? ($website->ssl_days_remaining > 14
+                    ? "🔒 Valid SSL ({$website->ssl_days_remaining} days left)"
+                    : ($website->ssl_days_remaining > 0 ? "⚠️ Expiring Soon ({$website->ssl_days_remaining} days left)" : '🔴 SSL Expired'))
+                : '❌ No SSL / Domain Unreachable',
+            'badge_color' => ($website->ssl_days_remaining ?? -1) > 14 ? '#10b981' : (($website->ssl_days_remaining ?? -1) > 0 ? '#f59e0b' : '#ef4444'),
         ];
 
         if ($primaryIp && ! self::isReservedOrFakeHost($primaryIp)) {

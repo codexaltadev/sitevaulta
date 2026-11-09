@@ -8,6 +8,7 @@ use App\Models\Payment;
 use App\Models\Referral;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Notifications\WorkspaceAlertDispatcher;
 use App\Services\Security\AuditLogService;
 use App\Services\Settings\SystemSettingsService;
 use Illuminate\Database\Eloquent\Model;
@@ -77,7 +78,7 @@ class EmailWalletService
             $locked->update(['email_credits_balance' => $newBalance]);
             $workspace->email_credits_balance = $newBalance;
 
-            return EmailWalletTransaction::create([
+            $tx = EmailWalletTransaction::create([
                 'workspace_id' => $locked->id,
                 'type' => $type,
                 'credits_delta' => $credits,
@@ -87,6 +88,17 @@ class EmailWalletService
                 'reference_id' => $reference?->getKey(),
                 'metadata' => $metadata,
             ]);
+
+            if ($credits > 0) {
+                WorkspaceAlertDispatcher::sendDatabaseNotificationToWorkspace(
+                    workspace: $locked,
+                    title: "💳 +{$credits} Email Credits Added to Wallet",
+                    body: "{$description} (New Balance: {$newBalance} Credits)",
+                    status: 'success'
+                );
+            }
+
+            return $tx;
         });
     }
 

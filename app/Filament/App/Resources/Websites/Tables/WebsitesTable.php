@@ -6,6 +6,8 @@ use App\Enums\VerificationMethod;
 use App\Enums\WebsiteVerificationStatus;
 use App\Models\ServerConnection;
 use App\Models\Website;
+use App\Services\Notifications\WorkspaceAlertDispatcher;
+use App\Services\Security\WebsiteSecurityScannerService;
 use App\Services\Verification\DomainVerificationService;
 use App\Services\Verification\WebsiteUptimeMonitorService;
 use Filament\Actions\Action;
@@ -64,10 +66,24 @@ class WebsitesTable
                             ? 'Server: '.strtoupper((string) ($record->server_live_status ?: 'OK')).' • Checked '.$record->last_uptime_checked_at->diffForHumans()
                             : 'Click "Check Live Status" or "View"')),
 
-                TextColumn::make('verified_at')
-                    ->label('Verified At')
-                    ->dateTime()
-                    ->placeholder('Not verified yet'),
+                TextColumn::make('security_scan_status')
+                    ->label('Security & Malware Shield')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state, Website $record): string => match ($state) {
+                        'clean' => '🛡️ Clean (0 Threats)',
+                        'warning' => '⚠️ Header Warning (0 Malware)',
+                        'infected' => '🚨 '.((int) $record->security_threats_count).' Threat(s) Found',
+                        default => '⚪ Not Scanned',
+                    })
+                    ->color(fn (?string $state): string => match ($state) {
+                        'clean' => 'success',
+                        'warning' => 'warning',
+                        'infected' => 'danger',
+                        default => 'gray',
+                    })
+                    ->description(fn (Website $record): string => $record->last_security_scan_at
+                        ? 'Read-Only Scan • '.$record->last_security_scan_at->diffForHumans()
+                        : 'Click "View" or "Scan Malware"'),
             ])
             ->recordActions([
                 Action::make('viewSiteIntelligence')
@@ -76,8 +92,8 @@ class WebsitesTable
                     ->color('info')
                     ->modalWidth('5xl')
                     ->modalHeading(fn (Website $record): string => "🌐 Site & Server Intelligence — {$record->name} ({$record->domain})")
-                    ->modalDescription('Real-time Domain DNS, SSL Expiry Guard, Connected Server & DB Health, Smart Email Alert Routing, and Backup Protection Footprint.')
-                    ->modalSubmitActionLabel('🔄 Re-Scan Live Domain & Server Now')
+                    ->modalDescription('Real-time Domain DNS, SSL Expiry Guard, Connected Server & DB Health, 100% Read-Only Malware & Web-Shell Scanner, and Backup Footprint.')
+                    ->modalSubmitActionLabel('🔄 Re-Scan Live Domain, Server & Security Shield Now')
                     ->modalCancelActionLabel('Close')
                     ->schema([
                         Placeholder::make('site_intelligence_dashboard')
@@ -86,19 +102,75 @@ class WebsitesTable
                     ])
                     ->action(function (Website $record): void {
                         $result = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($record);
+                        $secResult = WebsiteSecurityScannerService::scanWebsiteAndServer($record);
+
+                        $secText = $secResult['critical_count'] > 0
+                            ? " | 🚨 {$secResult['critical_count']} Security Threat(s) Reported (Read-Only)"
+                            : ' | 🛡️ 0 Malware/Web-Shells';
 
                         if ($result['is_online']) {
                             Notification::make()
                                 ->title('🟢 Live Scan Complete: Domain & Server are Online!')
-                                ->body($result['message'])
+                                ->body($result['message'].$secText)
                                 ->success()
                                 ->send();
+
+                            if ($record->workspace) {
+                                WorkspaceAlertDispatcher::sendDatabaseNotificationToWorkspace(
+                                    workspace: $record->workspace,
+                                    title: "🟢 Live Scan: {$record->name} ({$record->domain}) is Online",
+                                    body: $result['message'].$secText,
+                                    status: 'success'
+                                );
+                            }
                         } else {
                             Notification::make()
                                 ->title('🔴 Live Scan Complete: Domain or Server is Unreachable!')
-                                ->body($result['message'].($result['email_notified'] ? ' (Owner alert email dispatched)' : ''))
+                                ->body($result['message'].$secText.($result['email_notified'] ? ' (Owner alert email dispatched)' : ''))
                                 ->danger()
                                 ->send();
+                        }
+                    }),
+
+                Action::make('clientReport')
+                    ->label('Client PDF Report')
+                    ->icon(Heroicon::OutlinedDocumentChartBar)
+                    ->color('primary')
+                    ->url(fn (Website $record): string => route('websites.client-report.view', [
+                        'workspaceSlug' => $record->workspace?->slug ?? 'demo-agency',
+                        'websiteUuid' => $record->uuid,
+                    ]))
+                    ->openUrlInNewTab(),
+
+                Action::make('scanMalwareReadOnly')
+                    ->label('Scan Malware (Read-Only)')
+                    ->icon(Heroicon::OutlinedShieldCheck)
+                    ->color('warning')
+                    ->action(function (Website $record): void {
+                        $secResult = WebsiteSecurityScannerService::scanWebsiteAndServer($record);
+
+                        if ($secResult['critical_count'] > 0) {
+                            Notification::make()
+                                ->title("🚨 {$secResult['critical_count']} Suspicious File(s) / Exposure(s) Detected!")
+                                ->body('100% Read-Only Report generated. Click "View" to see exact file locations on your server. No files were deleted or modified.')
+                                ->danger()
+                                ->persistent()
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->title('🛡️ Read-Only Security Scan Clean (0 Malware / 0 Web-Shells)')
+                                ->body('No web-shells, obfuscated malware, or exposed .env/.git files were detected.')
+                                ->success()
+                                ->send();
+
+                            if ($record->workspace) {
+                                WorkspaceAlertDispatcher::sendDatabaseNotificationToWorkspace(
+                                    workspace: $record->workspace,
+                                    title: "🛡️ Security Scan Clean: {$record->name} ({$record->domain})",
+                                    body: '100% Read-Only Scan completed: 0 Malware, 0 Web-Shells, and 0 Exposed .env/.git files detected.',
+                                    status: 'success'
+                                );
+                            }
                         }
                     }),
 
@@ -210,6 +282,12 @@ class WebsitesTable
             $record->refresh();
         }
 
+        // Auto-run Read-Only Security Scan if never scanned before
+        if (! $record->last_security_scan_at) {
+            WebsiteSecurityScannerService::scanWebsiteAndServer($record, sendAlertIfThreatsFound: false);
+            $record->refresh();
+        }
+
         $intel = WebsiteUptimeMonitorService::inspectSiteAndServerIntelligence($record);
         $isOnline = $record->uptime_status === 'online';
 
@@ -243,6 +321,11 @@ class WebsitesTable
         $checkedAgo = $record->last_uptime_checked_at
             ? $record->last_uptime_checked_at->diffForHumans()
             : 'Just now';
+
+        $clientReportUrl = route('websites.client-report.view', [
+            'workspaceSlug' => $record->workspace?->slug ?? 'demo-agency',
+            'websiteUuid' => $record->uuid,
+        ]);
 
         $downReasonBanner = (! $isOnline && $record->last_down_reason)
             ? '<div style="margin-top:10px;padding:10px 14px;border-radius:8px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#fca5a5;font-size:13px;">'
@@ -306,6 +389,48 @@ class WebsitesTable
             ? '<span style="color:#10b981;font-weight:700;">🛡️ Active & Ready (Auto-switches if primary is unavailable)</span>'
             : '<span style="color:#f59e0b;font-weight:700;">⚠️ Top up Wallet or configure Custom SMTP</span>';
 
+        // Read-Only Malware, Web-Shell & Security Shield Report HTML
+        $secReport = $record->security_scan_report ?? [];
+        $secFindings = $secReport['findings'] ?? [];
+        $secScannedAgo = $record->last_security_scan_at ? $record->last_security_scan_at->diffForHumans() : 'Just now';
+        $secCriticalCount = (int) ($record->security_threats_count ?? 0);
+
+        $secBadgeHtml = $secCriticalCount > 0
+            ? "<span style='padding:3px 10px;border-radius:999px;background:rgba(239,68,68,0.2);color:#f87171;font-size:12px;font-weight:700;'>🚨 {$secCriticalCount} Critical/High Threat(s) Reported</span>"
+            : "<span style='padding:3px 10px;border-radius:999px;background:rgba(16,185,129,0.2);color:#34d399;font-size:12px;font-weight:700;'>🛡️ Clean — 0 Malware / 0 Web-Shells Found</span>";
+
+        $secRowsHtml = '';
+        if (empty($secFindings)) {
+            $secRowsHtml = '<tr><td colspan="4" style="padding:12px;text-align:center;color:#34d399;font-size:12.5px;">✅ No suspicious web-shells, obfuscated PHP malware, or publicly exposed .env / .git files were found.</td></tr>';
+        } else {
+            foreach ($secFindings as $item) {
+                $sev = (string) ($item['severity'] ?? 'LOW');
+                $sevColor = match ($sev) {
+                    'CRITICAL', 'HIGH' => '#ef4444',
+                    'MEDIUM' => '#f59e0b',
+                    default => '#38bdf8',
+                };
+                $lineTag = ! empty($item['line']) ? ' <span style="color:#94a3b8;">(Line '.(int) $item['line'].')</span>' : '';
+
+                $secRowsHtml .= sprintf(
+                    '<tr style="border-top:1px solid rgba(148,163,184,0.15);">'
+                    .'<td style="padding:8px 10px;font-size:11px;font-weight:800;color:%s;">%s</td>'
+                    .'<td style="padding:8px 10px;font-size:12px;color:#f8fafc;"><strong>%s</strong><div style="font-size:11px;color:#94a3b8;">%s</div></td>'
+                    .'<td style="padding:8px 10px;font-size:12px;color:#38bdf8;font-family:monospace;word-break:break-all;"><code>%s</code>%s</td>'
+                    .'<td style="padding:8px 10px;font-size:11.5px;color:#cbd5e1;"><div><code>%s</code></div><div style="color:#94a3b8;margin-top:2px;">%s</div></td>'
+                    .'</tr>',
+                    $sevColor,
+                    e($sev),
+                    e((string) ($item['label'] ?? '')),
+                    e((string) ($item['category'] ?? '')),
+                    e((string) ($item['location'] ?? '')),
+                    $lineTag,
+                    e((string) ($item['evidence'] ?? '')),
+                    e((string) ($item['recommendation'] ?? ''))
+                );
+            }
+        }
+
         // Recent 5 Backup Runs HTML
         $runsRowsHtml = '';
         if ($intel['recent_runs']->isEmpty()) {
@@ -353,6 +478,11 @@ class WebsitesTable
                 <div style="text-align:right;border-left:1px solid rgba(148,163,184,0.3);padding-left:14px;">
                     <div style="font-size:11px;color:#cbd5e1;">Vault Backups</div>
                     <div style="font-size:18px;font-weight:800;color:#f8fafc;">{$intel['total_completed_backups']} ({$vaultGb} MB)</div>
+                </div>
+                <div style="border-left:1px solid rgba(148,163,184,0.3);padding-left:14px;">
+                    <a href="{$clientReportUrl}" target="_blank" style="display:inline-block;padding:8px 14px;border-radius:8px;background:#0d9488;color:#ffffff;font-weight:700;font-size:12px;text-decoration:none;">
+                        📄 Client PDF Report
+                    </a>
                 </div>
             </div>
         </div>
@@ -405,10 +535,38 @@ class WebsitesTable
         </div>
     </div>
 
-    <!-- Card 3: Recent 5 Backup Runs -->
+    <!-- Card 3: Read-Only Malware, Web-Shell & Security Shield Report -->
+    <div style="padding:16px;border-radius:12px;background:rgba(30,41,59,0.75);border:1px solid rgba(148,163,184,0.2);">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+            <div>
+                <h4 style="margin:0;font-size:14px;font-weight:700;color:#f59e0b;">🛡️ 3. Malware, Web-Shell &amp; Security Shield Report (Scanned {$secScannedAgo})</h4>
+                <div style="font-size:11.5px;color:#94a3b8;margin-top:3px;">
+                    🔒 <strong>100% Read-Only Non-Destructive Guarantee:</strong> Reports exact file locations only. SiteVaulta <strong>NEVER</strong> deletes or modifies any file on your live server.
+                </div>
+            </div>
+            <div>{$secBadgeHtml}</div>
+        </div>
+        <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;text-align:left;">
+                <thead>
+                    <tr style="border-bottom:1px solid rgba(148,163,184,0.25);font-size:11px;text-transform:uppercase;color:#94a3b8;">
+                        <th style="padding:6px 10px;width:90px;">Severity</th>
+                        <th style="padding:6px 10px;width:230px;">Detected Issue / Category</th>
+                        <th style="padding:6px 10px;">Exact File Location / Server Path</th>
+                        <th style="padding:6px 10px;">Matched Evidence &amp; Manual Advice</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {$secRowsHtml}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Card 4: Recent 5 Backup Runs -->
     <div style="padding:16px;border-radius:12px;background:rgba(30,41,59,0.75);border:1px solid rgba(148,163,184,0.2);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <h4 style="margin:0;font-size:14px;font-weight:700;color:#34d399;">🛡️ 3. Recent Backup Runs & Recovery Readiness (Active Policies: {$intel['active_policies_count']})</h4>
+            <h4 style="margin:0;font-size:14px;font-weight:700;color:#34d399;">📦 4. Recent Backup Runs &amp; Recovery Readiness (Active Policies: {$intel['active_policies_count']})</h4>
         </div>
         <div style="overflow-x:auto;">
             <table style="width:100%;border-collapse:collapse;text-align:left;">

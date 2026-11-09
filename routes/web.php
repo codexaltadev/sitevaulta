@@ -4,6 +4,7 @@ use App\Http\Controllers\BillingCheckoutController;
 use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\GoogleDriveOAuthController;
 use App\Http\Controllers\Webhooks\PaymentWebhookController;
+use App\Http\Controllers\WebsiteClientReportController;
 use App\Models\Plan;
 use App\Services\Settings\SystemSettingsService;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -160,6 +161,15 @@ Route::get('/billing/invoice/{paymentUuid}/view', [BillingCheckoutController::cl
 Route::get('/billing/invoice/{paymentUuid}/pdf', [BillingCheckoutController::class, 'downloadInvoicePdf'])
     ->middleware('auth')
     ->name('billing.invoice.pdf');
+
+// White-Label Client Executive Maintenance & Security Report (Web Preview & A4 PDF Download)
+Route::get('/app/{workspaceSlug}/websites/{websiteUuid}/client-report', [WebsiteClientReportController::class, 'viewReport'])
+    ->middleware('auth')
+    ->name('websites.client-report.view');
+
+Route::get('/app/{workspaceSlug}/websites/{websiteUuid}/client-report/pdf', [WebsiteClientReportController::class, 'downloadPdf'])
+    ->middleware('auth')
+    ->name('websites.client-report.pdf');
 
 // Google Drive OAuth 2.0 Redirect & Callback (Supports both /vaultix/auth/google/callback and /auth/google/callback)
 Route::get('/auth/google/redirect', [GoogleDriveOAuthController::class, 'redirect'])

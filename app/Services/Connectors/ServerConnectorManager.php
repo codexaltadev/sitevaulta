@@ -8,6 +8,7 @@ use App\Enums\DatabaseDriver;
 use App\Enums\FileProtocol;
 use App\Models\ServerConnection;
 use App\Services\Security\SsrfValidator;
+use App\Services\Security\WebsiteSecurityScannerService;
 use Illuminate\Support\Facades\Http;
 use PDO;
 use phpseclib3\Crypt\PublicKeyLoader;
@@ -418,6 +419,19 @@ class ServerConnectorManager
             $changedFilesCount += $fileStats['changed_count'];
             $rawSizeBytes += $fileStats['raw_bytes'];
             $manifest = array_merge($manifest, $fileStats['manifest']);
+
+            // Run 100% Read-Only Malware & Web-Shell Diagnostic Scan on staged backup files
+            if ($connection->website && empty($connection->file_credentials['simulation_mode'])) {
+                try {
+                    WebsiteSecurityScannerService::scanWebsiteAndServer(
+                        website: $connection->website,
+                        localStagedFilesDir: $filesSubDir,
+                        sendAlertIfThreatsFound: true
+                    );
+                } catch (\Throwable) {
+                    // Never block backup completion if security scanner encounters an issue
+                }
+            }
         }
 
         // Write manifest.json into staging directory

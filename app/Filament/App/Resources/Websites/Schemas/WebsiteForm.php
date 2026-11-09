@@ -122,6 +122,29 @@ class WebsiteForm
                                             ->label('Send Alert When Domain or Server RECOVERS (Back Online)')
                                             ->default(true)
                                             ->onColor('success'),
+
+                                        Toggle::make('notify_on_malware_detected')
+                                            ->label('🛡️ Send Read-Only Security Alert When Malware / Web-Shell / Exposed File is Detected')
+                                            ->helperText('100% Read-Only Guarantee: Only reports exact suspicious file path(s) to your email. SiteVaulta NEVER deletes or modifies any file on your live server.')
+                                            ->default(true)
+                                            ->onColor('warning')
+                                            ->columnSpanFull(),
+
+                                        Toggle::make('notify_on_ssl_expiry')
+                                            ->label('🔒 Send SSL Certificate Expiry Auto-Reminder')
+                                            ->helperText('Alerts you via Email and In-App Notification Bell before your HTTPS SSL certificate expires.')
+                                            ->default(true)
+                                            ->onColor('info'),
+
+                                        Select::make('ssl_expiry_warning_days')
+                                            ->label('SSL Expiry Reminder Threshold')
+                                            ->options([
+                                                30 => '30 Days Before Expiry',
+                                                14 => '14 Days Before Expiry (Recommended)',
+                                                7 => '7 Days Before Expiry',
+                                                3 => '3 Days Before Expiry',
+                                            ])
+                                            ->default(14),
                                     ]),
                             ]),
 

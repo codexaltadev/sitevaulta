@@ -47,6 +47,8 @@ class AppPanelProvider extends PanelProvider
             ->darkMode(true)
             ->themeSwitcher(true)
             ->defaultThemeMode(ThemeMode::System)
+            ->databaseNotifications()
+            ->databaseNotificationsPolling('15s')
             ->renderHook(PanelsRenderHook::HEAD_END, fn () => view('partials.filament-theme-variables'))
             ->colors([
                 'primary' => Color::Teal,

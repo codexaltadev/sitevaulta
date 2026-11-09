@@ -18,6 +18,7 @@ use App\Models\Workspace;
 use App\Services\Billing\EmailWalletService;
 use App\Services\Billing\MultiGatewayBillingService;
 use App\Services\Notifications\WorkspaceAlertDispatcher;
+use App\Services\Security\WebsiteSecurityScannerService;
 use App\Services\Verification\WebsiteUptimeMonitorService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -268,5 +269,125 @@ class BackupPolicyEmailNotificationTest extends TestCase
         $this->assertNull($intel['primary_ip']);
         $this->assertArrayHasKey('protection_score', $intel);
         $this->assertArrayHasKey('ssl', $intel);
+    }
+
+    public function test_read_only_malware_and_webshell_scanner_reports_exact_locations_without_deleting_files(): void
+    {
+        $workspace = Workspace::where('slug', 'demo-agency')->firstOrFail();
+        $website = Website::where('workspace_id', $workspace->id)->firstOrFail();
+
+        $workspace->update(['email_credits_balance' => 20]);
+        $website->update([
+            'uptime_alert_email' => 'security-owner@example.com',
+            'notify_on_malware_detected' => true,
+        ]);
+
+        // Create a temporary staged directory simulating files read from the server
+        $tempDir = sys_get_temp_dir().'/sitevaulta_sec_scan_'.uniqid();
+        mkdir($tempDir.'/wp-content/uploads/2026', 0755, true);
+
+        $cleanFile = $tempDir.'/index.php';
+        $webshellFile = $tempDir.'/wp-content/uploads/2026/wso.php';
+        $obfuscatedFile = $tempDir.'/wp-content/themes/header.php';
+        mkdir(dirname($obfuscatedFile), 0755, true);
+
+        file_put_contents($cleanFile, "<?php\n// Normal entry point\necho 'Hello World';\n");
+        file_put_contents($webshellFile, "<?php\n// Suspicious shell in uploads\n\$cmd = \$_POST['cmd'];\nshell_exec(\$_POST['cmd']);\n");
+        file_put_contents($obfuscatedFile, "<?php\n// Theme header\neval(base64_decode('ZWNobyBoYWNrZWQ7'));\n");
+
+        $scanResult = WebsiteSecurityScannerService::scanWebsiteAndServer(
+            website: $website,
+            localStagedFilesDir: $tempDir,
+            sendAlertIfThreatsFound: true
+        );
+
+        // 1. Verify threats are accurately detected and reported with exact paths
+        $this->assertEquals('infected', $scanResult['status']);
+        $this->assertGreaterThanOrEqual(3, $scanResult['critical_count']);
+        $this->assertTrue($scanResult['email_notified']);
+
+        $locations = array_column($scanResult['findings'], 'location');
+        $this->assertContains('/var/www/acme-commerce/wp-content/uploads/2026/wso.php', $locations);
+        $this->assertContains('/var/www/acme-commerce/wp-content/themes/header.php', $locations);
+
+        // 2. 100% READ-ONLY GUARANTEE: Verify NO files were deleted or modified by the scanner!
+        $this->assertFileExists($cleanFile);
+        $this->assertFileExists($webshellFile);
+        $this->assertFileExists($obfuscatedFile);
+
+        $website->refresh();
+        $this->assertEquals('infected', $website->security_scan_status);
+        $this->assertGreaterThanOrEqual(3, $website->security_threats_count);
+        $this->assertNotNull($website->last_security_scan_at);
+
+        // 3. Verify in-app Database Notifications were saved to the notifications table for the Workspace Owner!
+        $owner = $workspace->owner;
+        $this->assertNotNull($owner);
+        $this->assertGreaterThan(0, $owner->notifications()->count());
+
+        // Clean up temp test directory
+        @unlink($cleanFile);
+        @unlink($webshellFile);
+        @unlink($obfuscatedFile);
+        @rmdir($tempDir.'/wp-content/uploads/2026');
+        @rmdir($tempDir.'/wp-content/uploads');
+        @rmdir($tempDir.'/wp-content/themes');
+        @rmdir($tempDir.'/wp-content');
+        @rmdir($tempDir);
+    }
+
+    public function test_ssl_expiry_auto_reminder_and_whitelabel_client_pdf_report(): void
+    {
+        $workspace = Workspace::where('slug', 'demo-agency')->firstOrFail();
+        $website = Website::where('workspace_id', $workspace->id)->firstOrFail();
+        $owner = $workspace->owner;
+
+        $workspace->update([
+            'email_credits_balance' => 30,
+            'report_brand_name' => 'Apex Digital Agency Ltd.',
+            'report_footer_note' => 'Prepared by Apex Digital Security & Cloud Backup Team',
+        ]);
+
+        $website->update([
+            'notify_on_ssl_expiry' => true,
+            'ssl_expiry_warning_days' => 14,
+            'uptime_alert_email' => 'ssl-owner@example.com',
+        ]);
+
+        // 1. Test SSL Certificate Expiry Auto-Reminder (7 days remaining <= 14 day threshold)
+        $sslResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus(
+            website: $website->fresh(),
+            forceSimulateOnline: true,
+            forceSimulateSslDaysRemaining: 7
+        );
+
+        $this->assertEquals('expiring_soon', $sslResult['ssl_status']);
+        $this->assertEquals(7, $sslResult['ssl_days_remaining']);
+        $this->assertTrue($sslResult['ssl_expiry_alert_sent']);
+
+        $website->refresh();
+        $this->assertEquals('expiring_soon', $website->ssl_status);
+        $this->assertEquals(7, $website->ssl_days_remaining);
+        $this->assertNotNull($website->last_ssl_expiry_notified_at);
+
+        // 2. Test White-Label Client Executive Maintenance Report (Web Preview & PDF Download)
+        $this->actingAs($owner);
+
+        $previewResp = $this->get(route('websites.client-report.view', [
+            'workspaceSlug' => $workspace->slug,
+            'websiteUuid' => $website->uuid,
+            'period' => 30,
+        ]));
+        $previewResp->assertStatus(200);
+        $previewResp->assertSee('Apex Digital Agency Ltd.');
+        $previewResp->assertSee('Prepared by Apex Digital Security & Cloud Backup Team');
+        $previewResp->assertSee($website->domain);
+        $previewResp->assertSee('7 Days Left');
+
+        $pdfResp = $this->get(route('websites.client-report.pdf', [
+            'workspaceSlug' => $workspace->slug,
+            'websiteUuid' => $website->uuid,
+        ]));
+        $pdfResp->assertStatus(200);
     }
 }
