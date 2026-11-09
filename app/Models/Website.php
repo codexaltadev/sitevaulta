@@ -26,6 +26,18 @@ class Website extends Model
         'known_files_size_bytes',
         'known_db_size_bytes',
         'status',
+        'uptime_monitoring_enabled',
+        'uptime_status',
+        'last_http_status_code',
+        'last_response_time_ms',
+        'server_live_status',
+        'last_uptime_checked_at',
+        'last_down_reason',
+        'uptime_alert_email',
+        'uptime_email_provider_mode',
+        'notify_on_downtime',
+        'notify_on_recovery',
+        'last_downtime_notified_at',
     ];
 
     protected function casts(): array
@@ -36,6 +48,13 @@ class Website extends Model
             'verified_at' => 'datetime',
             'known_files_size_bytes' => 'integer',
             'known_db_size_bytes' => 'integer',
+            'uptime_monitoring_enabled' => 'boolean',
+            'last_http_status_code' => 'integer',
+            'last_response_time_ms' => 'integer',
+            'last_uptime_checked_at' => 'datetime',
+            'notify_on_downtime' => 'boolean',
+            'notify_on_recovery' => 'boolean',
+            'last_downtime_notified_at' => 'datetime',
         ];
     }
 

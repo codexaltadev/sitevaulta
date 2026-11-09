@@ -299,13 +299,13 @@ class BackupPolicyForm
                                                     : "System Email Wallet — {$credits} Credits Available";
 
                                                 return [
-                                                    'workspace_default' => "Use Workspace Default ({$defaultLabel})",
-                                                    'custom_smtp' => '🔧 My Own Custom SMTP Server (100% Free & Unlimited)',
-                                                    'system_wallet' => "💳 SiteVaulta System Email Package (Deducts 1 Wallet Credit / Email — Balance: {$credits})",
+                                                    'workspace_default' => "Use Workspace Default ({$defaultLabel} — Auto-Fallback Enabled)",
+                                                    'custom_smtp' => '🔧 My Own Custom SMTP First (Free — Auto-Falls Back to System Email Wallet if SMTP Not Set)',
+                                                    'system_wallet' => "💳 SiteVaulta System Email Package First ({$credits} Credits — Auto-Falls Back to Custom SMTP if 0 Credits)",
                                                 ];
                                             })
                                             ->default('workspace_default')
-                                            ->helperText('Use your own SMTP server for free, or use SiteVaulta System Email powered by your Digital Email Wallet credits (buy packages or earn free credits via referrals).')
+                                            ->helperText('Smart Fallback: If your selected delivery option is unavailable (e.g., 0 wallet credits or Custom SMTP not set), SiteVaulta automatically sends using whichever option is available.')
                                             ->columnSpanFull(),
 
                                         TextInput::make('notification_email')

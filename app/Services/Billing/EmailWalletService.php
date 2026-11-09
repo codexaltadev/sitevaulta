@@ -288,6 +288,13 @@ class EmailWalletService
         });
     }
 
+    public static function hasValidCustomSmtp(Workspace $workspace): bool
+    {
+        $cfg = $workspace->custom_smtp_config ?? [];
+
+        return is_array($cfg) && trim((string) ($cfg['host'] ?? '')) !== '';
+    }
+
     public static function sendEmailViaCustomSmtp(
         Workspace $workspace,
         string $recipientEmail,

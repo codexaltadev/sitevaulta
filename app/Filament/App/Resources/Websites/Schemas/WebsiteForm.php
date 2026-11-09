@@ -3,10 +3,13 @@
 namespace App\Filament\App\Resources\Websites\Schemas;
 
 use App\Models\Website;
+use App\Models\Workspace;
 use App\Services\Verification\DomainVerificationService;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -21,55 +24,105 @@ class WebsiteForm
                 Grid::make(12)
                     ->columnSpanFull()
                     ->schema([
-                        // LEFT COLUMN (7/12): Website Registration Form
-                        Section::make('Website Details & Source Size Estimates')
-                            ->description('Register your website URL first, then verify domain ownership via DNS TXT, HTML File, or Meta Tag.')
+                        // LEFT COLUMN (7/12): Website Registration Form & Live Uptime Monitoring
+                        Grid::make(1)
                             ->columnSpan(7)
-                            ->columns(2)
                             ->schema([
-                                TextInput::make('name')
-                                    ->label('Website Label / Project Name')
-                                    ->placeholder('e.g., Client E-Commerce Store')
-                                    ->required()
-                                    ->maxLength(120),
+                                Section::make('Website Details & Source Size Estimates')
+                                    ->description('Register your website URL first, then verify domain ownership via DNS TXT, HTML File, or Meta Tag.')
+                                    ->columns(2)
+                                    ->schema([
+                                        TextInput::make('name')
+                                            ->label('Website Label / Project Name')
+                                            ->placeholder('e.g., Client E-Commerce Store')
+                                            ->required()
+                                            ->maxLength(120),
 
-                                TextInput::make('url')
-                                    ->label('Website Full URL')
-                                    ->placeholder('https://example.com')
-                                    ->url()
-                                    ->required()
-                                    ->maxLength(255),
+                                        TextInput::make('url')
+                                            ->label('Website Full URL')
+                                            ->placeholder('https://example.com')
+                                            ->url()
+                                            ->required()
+                                            ->maxLength(255),
 
-                                Select::make('environment')
-                                    ->label('Environment')
-                                    ->options([
-                                        'production' => 'Production',
-                                        'staging' => 'Staging',
-                                        'development' => 'Development',
-                                    ])
-                                    ->default('production')
-                                    ->required(),
+                                        Select::make('environment')
+                                            ->label('Environment')
+                                            ->options([
+                                                'production' => 'Production',
+                                                'staging' => 'Staging',
+                                                'development' => 'Development',
+                                            ])
+                                            ->default('production')
+                                            ->required(),
 
-                                Select::make('status')
-                                    ->label('Operational Status')
-                                    ->options([
-                                        'active' => 'Active',
-                                        'paused' => 'Paused',
-                                    ])
-                                    ->default('active')
-                                    ->required(),
+                                        Select::make('status')
+                                            ->label('Operational Status')
+                                            ->options([
+                                                'active' => 'Active',
+                                                'paused' => 'Paused',
+                                            ])
+                                            ->default('active')
+                                            ->required(),
 
-                                TextInput::make('known_files_size_bytes')
-                                    ->label('Estimated Website Files Size (Bytes)')
-                                    ->helperText('500 MB = 524288000 | 1 GB = 1073741824')
-                                    ->numeric()
-                                    ->default(524288000),
+                                        TextInput::make('known_files_size_bytes')
+                                            ->label('Estimated Website Files Size (Bytes)')
+                                            ->helperText('500 MB = 524288000 | 1 GB = 1073741824')
+                                            ->numeric()
+                                            ->default(524288000),
 
-                                TextInput::make('known_db_size_bytes')
-                                    ->label('Estimated Database Size (Bytes)')
-                                    ->helperText('100 MB = 104857600')
-                                    ->numeric()
-                                    ->default(104857600),
+                                        TextInput::make('known_db_size_bytes')
+                                            ->label('Estimated Database Size (Bytes)')
+                                            ->helperText('100 MB = 104857600')
+                                            ->numeric()
+                                            ->default(104857600),
+                                    ]),
+
+                                Section::make('📡 Live Domain & Server Uptime Monitoring + Owner Alerts')
+                                    ->description('Automatically monitor whether your verified domain and connected server are live. If the website or server goes down, an instant alert email is sent to the owner.')
+                                    ->columns(2)
+                                    ->schema([
+                                        Toggle::make('uptime_monitoring_enabled')
+                                            ->label('Enable Automatic Live Domain & Server Uptime Check')
+                                            ->default(true)
+                                            ->onColor('success')
+                                            ->columnSpanFull(),
+
+                                        TextInput::make('uptime_alert_email')
+                                            ->label('Owner Alert Email Address (For Downtime & Recovery)')
+                                            ->email()
+                                            ->placeholder(fn (): string => auth()->user()?->email ?: 'owner@youragency.com')
+                                            ->default(fn (): ?string => auth()->user()?->email)
+                                            ->helperText('If left blank, alerts will be sent to the Workspace Owner email.')
+                                            ->columnSpanFull(),
+
+                                        Select::make('uptime_email_provider_mode')
+                                            ->label('Preferred Email Delivery Method (With Smart Auto-Fallback)')
+                                            ->options(function (): array {
+                                                /** @var Workspace|null $ws */
+                                                $ws = Filament::getTenant();
+                                                $credits = (int) ($ws?->email_credits_balance ?? 0);
+                                                $hasSmtp = $ws?->hasValidCustomSmtp() ?? false;
+
+                                                return [
+                                                    'workspace_default' => 'Use Workspace Default (Auto-Fallback Enabled)',
+                                                    'custom_smtp' => '🔧 My Own Custom SMTP First (Free — Auto-Falls Back to System Wallet if SMTP Not Set)',
+                                                    'system_wallet' => "💳 System Email Package First ({$credits} Credits — Auto-Falls Back to Custom SMTP if 0 Credits)",
+                                                ];
+                                            })
+                                            ->default('workspace_default')
+                                            ->helperText('Smart Fallback: If your selected option (e.g., Custom SMTP or System Email Wallet Credits) is not available, SiteVaulta will automatically send using whichever option is available so you never miss a Down alert!')
+                                            ->columnSpanFull(),
+
+                                        Toggle::make('notify_on_downtime')
+                                            ->label('Send Alert When Domain or Server Goes DOWN')
+                                            ->default(true)
+                                            ->onColor('danger'),
+
+                                        Toggle::make('notify_on_recovery')
+                                            ->label('Send Alert When Domain or Server RECOVERS (Back Online)')
+                                            ->default(true)
+                                            ->onColor('success'),
+                                    ]),
                             ]),
 
                         // RIGHT COLUMN (5/12): Step-by-Step Domain Verification Guide

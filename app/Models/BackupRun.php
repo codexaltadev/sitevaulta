@@ -90,6 +90,11 @@ class BackupRun extends Model
         return $this->belongsTo(BackupPolicy::class);
     }
 
+    public function policy(): BelongsTo
+    {
+        return $this->belongsTo(BackupPolicy::class, 'backup_policy_id');
+    }
+
     public function backupChain(): BelongsTo
     {
         return $this->belongsTo(BackupChain::class);

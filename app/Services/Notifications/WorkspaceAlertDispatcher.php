@@ -6,10 +6,12 @@ use App\Enums\NotificationChannelType;
 use App\Models\BackupPolicy;
 use App\Models\BackupRun;
 use App\Models\EmailTemplate;
+use App\Models\Website;
 use App\Models\Workspace;
 use App\Services\Billing\EmailWalletService;
 use App\Services\Settings\SystemSettingsService;
 use App\Services\Settings\WorkspaceSettingsService;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -165,36 +167,19 @@ class WorkspaceAlertDispatcher
 
         try {
             $workspace = $policy->workspace;
-            $providerMode = self::resolveEmailProviderMode($workspace, $policy, $run);
-
-            if ($providerMode === 'custom_smtp') {
-                if (! $workspace || ! $workspace->hasValidCustomSmtp()) {
-                    Log::warning("BackupPolicy [{$policy->id}] configured for custom_smtp, but workspace has no valid custom SMTP settings.");
-
-                    return false;
-                }
-
-                EmailWalletService::sendEmailViaCustomSmtp($workspace, $recipientEmail, $subject, $htmlBody);
-                $run->update([
-                    'email_provider_mode' => 'custom_smtp',
-                    'notification_sent_at' => now()->utc(),
-                ]);
-
-                return true;
-            }
-
-            // System Email Wallet Mode: requires >= 1 credit in Digital Email Wallet
-            if (! $workspace || (int) $workspace->email_credits_balance < 1) {
-                Log::warning("Workspace [{$workspace?->slug}] has 0 System Email Wallet credits for run [{$run->id}]. Email skipped.");
-
+            if (! $workspace) {
                 return false;
             }
 
-            self::sendEmail($recipientEmail, $subject, $htmlBody);
+            $preferredMode = self::resolveEmailProviderMode($workspace, $policy, $run);
 
-            EmailWalletService::debitWalletForEmail(
+            $result = self::dispatchEmailWithFallback(
                 workspace: $workspace,
-                description: "System Email ({$eventCode}) sent to {$recipientEmail} — Policy '{$policy->name}' (Run #{$run->id})",
+                recipientEmail: $recipientEmail,
+                subject: $subject,
+                htmlBody: $htmlBody,
+                preferredMode: $preferredMode,
+                ledgerDescription: "System Email ({$eventCode}) sent to {$recipientEmail} — Policy '{$policy->name}' (Run #{$run->id})",
                 reference: $run,
                 metadata: [
                     'recipient' => $recipientEmail,
@@ -204,8 +189,12 @@ class WorkspaceAlertDispatcher
                 ]
             );
 
+            if (! $result['sent']) {
+                return false;
+            }
+
             $run->update([
-                'email_provider_mode' => 'system_wallet',
+                'email_provider_mode' => $result['provider_used'] ?: $preferredMode,
                 'notification_sent_at' => now()->utc(),
             ]);
 
@@ -215,6 +204,169 @@ class WorkspaceAlertDispatcher
 
             return false;
         }
+    }
+
+    /**
+     * Sends an email using the user's preferred delivery mode ('custom_smtp' or 'system_wallet'),
+     * and automatically falls back to whichever delivery method is available if the preferred one is unavailable!
+     *
+     * @return array{sent: bool, provider_used: string|null}
+     */
+    public static function dispatchEmailWithFallback(
+        Workspace $workspace,
+        string $recipientEmail,
+        string $subject,
+        string $htmlBody,
+        string $preferredMode = 'workspace_default',
+        string $ledgerDescription = 'System Email Alert',
+        ?Model $reference = null,
+        array $metadata = []
+    ): array {
+        $recipientEmail = trim($recipientEmail);
+        if ($recipientEmail === '') {
+            return ['sent' => false, 'provider_used' => null];
+        }
+
+        $workspace->refresh();
+
+        $effectivePreferred = in_array($preferredMode, ['custom_smtp', 'system_wallet'], true)
+            ? $preferredMode
+            : ($workspace->email_provider_mode === 'custom_smtp' ? 'custom_smtp' : 'system_wallet');
+
+        $order = $effectivePreferred === 'custom_smtp'
+            ? ['custom_smtp', 'system_wallet']
+            : ['system_wallet', 'custom_smtp'];
+
+        foreach ($order as $candidate) {
+            if ($candidate === 'custom_smtp') {
+                if (! $workspace->hasValidCustomSmtp()) {
+                    continue;
+                }
+
+                try {
+                    EmailWalletService::sendEmailViaCustomSmtp($workspace, $recipientEmail, $subject, $htmlBody);
+
+                    return ['sent' => true, 'provider_used' => 'custom_smtp'];
+                } catch (\Throwable $e) {
+                    Log::warning("Custom SMTP failed for workspace [{$workspace->slug}], attempting fallback: ".$e->getMessage());
+
+                    continue;
+                }
+            }
+
+            if ($candidate === 'system_wallet') {
+                if ((int) $workspace->email_credits_balance < 1) {
+                    continue;
+                }
+
+                try {
+                    SystemSettingsService::injectRuntimeConfig();
+                    self::sendEmail($recipientEmail, $subject, $htmlBody);
+
+                    EmailWalletService::debitWalletForEmail(
+                        workspace: $workspace,
+                        description: $ledgerDescription,
+                        reference: $reference,
+                        metadata: $metadata
+                    );
+
+                    return ['sent' => true, 'provider_used' => 'system_wallet'];
+                } catch (\Throwable $e) {
+                    Log::warning("System Email Wallet send failed for workspace [{$workspace->slug}], attempting fallback: ".$e->getMessage());
+
+                    continue;
+                }
+            }
+        }
+
+        Log::warning("Workspace [{$workspace->slug}] could not send email to [{$recipientEmail}]: neither Custom SMTP nor System Email Wallet credits were available.");
+
+        return ['sent' => false, 'provider_used' => null];
+    }
+
+    public static function sendWebsiteUptimeAlertEmail(
+        Website $website,
+        bool $isDown,
+        string $reason,
+        ?int $httpStatus = null,
+        ?int $responseTimeMs = null
+    ): bool {
+        $workspace = $website->workspace;
+        if (! $workspace) {
+            return false;
+        }
+
+        if ($isDown && ! ($website->notify_on_downtime ?? true)) {
+            return false;
+        }
+
+        if (! $isDown && ! ($website->notify_on_recovery ?? true)) {
+            return false;
+        }
+
+        $recipientEmail = trim((string) ($website->uptime_alert_email ?: $workspace->owner?->email));
+        if ($recipientEmail === '') {
+            return false;
+        }
+
+        $checkedAt = now()->utc()->format('Y-m-d H:i:s \U\T\C');
+
+        if ($isDown) {
+            $subject = "[SiteVaulta] 🚨 DOWN ALERT: {$website->name} ({$website->domain}) is Unreachable!";
+            $htmlBody = sprintf(
+                '<p><strong>🚨 Critical Uptime Alert:</strong> Your verified website <strong>%s</strong> (<code>%s</code>) or its connected server is currently unreachable.</p>'
+                .'<ul>'
+                .'<li><strong>Website URL:</strong> %s</li>'
+                .'<li><strong>Diagnostic Reason:</strong> <span style="color:#dc2626;font-weight:bold;">%s</span></li>'
+                .'<li><strong>HTTP Status Code:</strong> %s</li>'
+                .'<li><strong>Detected At:</strong> %s</li>'
+                .'</ul>'
+                .'<p>Please check your domain DNS, web server, or server connection immediately.</p>',
+                e($website->name),
+                e($website->domain),
+                e($website->url),
+                e($reason),
+                e($httpStatus ? (string) $httpStatus : 'No Response / Timeout'),
+                e($checkedAt)
+            );
+            $eventLabel = 'website_down';
+        } else {
+            $subject = "[SiteVaulta] ✅ RECOVERED: {$website->name} ({$website->domain}) is Back Online!";
+            $htmlBody = sprintf(
+                '<p><strong>✅ Website &amp; Server Recovered:</strong> Your website <strong>%s</strong> (<code>%s</code>) is back online and responding normally.</p>'
+                .'<ul>'
+                .'<li><strong>Website URL:</strong> %s</li>'
+                .'<li><strong>HTTP Status Code:</strong> %s</li>'
+                .'<li><strong>Response Time:</strong> %s ms</li>'
+                .'<li><strong>Verified At:</strong> %s</li>'
+                .'</ul>',
+                e($website->name),
+                e($website->domain),
+                e($website->url),
+                e((string) ($httpStatus ?: 200)),
+                e((string) ($responseTimeMs ?: 0)),
+                e($checkedAt)
+            );
+            $eventLabel = 'website_recovered';
+        }
+
+        $result = self::dispatchEmailWithFallback(
+            workspace: $workspace,
+            recipientEmail: $recipientEmail,
+            subject: $subject,
+            htmlBody: $htmlBody,
+            preferredMode: $website->uptime_email_provider_mode ?: 'workspace_default',
+            ledgerDescription: "Uptime Alert ({$eventLabel}) sent to {$recipientEmail} for {$website->domain}",
+            reference: $website,
+            metadata: [
+                'website_id' => $website->id,
+                'domain' => $website->domain,
+                'event' => $eventLabel,
+                'reason' => $reason,
+            ]
+        );
+
+        return $result['sent'];
     }
 
     public static function resolveEmailProviderMode(?Workspace $workspace, ?BackupPolicy $policy = null, ?BackupRun $run = null): string
@@ -230,9 +382,6 @@ class WorkspaceAlertDispatcher
         }
 
         $workspaceMode = $workspace?->email_provider_mode;
-        if ($workspaceMode === 'custom_smtp' && $workspace?->hasValidCustomSmtp()) {
-            return 'custom_smtp';
-        }
 
         return $workspaceMode === 'custom_smtp' ? 'custom_smtp' : 'system_wallet';
     }
@@ -244,24 +393,14 @@ class WorkspaceAlertDispatcher
         string $htmlBody,
         string $ledgerDescription
     ): void {
-        if ($recipientEmail === '') {
-            return;
-        }
-
-        if ($workspace->email_provider_mode === 'custom_smtp' && $workspace->hasValidCustomSmtp()) {
-            EmailWalletService::sendEmailViaCustomSmtp($workspace, $recipientEmail, $subject, $htmlBody);
-
-            return;
-        }
-
-        if ((int) $workspace->email_credits_balance < 1) {
-            Log::warning("Workspace [{$workspace->slug}] has 0 System Email Wallet credits for channel email [{$recipientEmail}].");
-
-            return;
-        }
-
-        self::sendEmail($recipientEmail, $subject, $htmlBody);
-        EmailWalletService::debitWalletForEmail($workspace, $ledgerDescription);
+        self::dispatchEmailWithFallback(
+            workspace: $workspace,
+            recipientEmail: $recipientEmail,
+            subject: $subject,
+            htmlBody: $htmlBody,
+            preferredMode: $workspace->email_provider_mode ?: 'system_wallet',
+            ledgerDescription: $ledgerDescription
+        );
     }
 
     protected static function sendEmail(string $recipientEmail, string $subject, string $htmlBody): void

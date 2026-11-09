@@ -18,6 +18,7 @@ use App\Models\Workspace;
 use App\Services\Billing\EmailWalletService;
 use App\Services\Billing\MultiGatewayBillingService;
 use App\Services\Notifications\WorkspaceAlertDispatcher;
+use App\Services\Verification\WebsiteUptimeMonitorService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -193,5 +194,79 @@ class BackupPolicyEmailNotificationTest extends TestCase
         $referredWorkspace->refresh();
         // 250 + 2500 base + 250 bonus = 3000 credits!
         $this->assertEquals(250 + $emailPkg->totalCredits(), $referredWorkspace->email_credits_balance);
+    }
+
+    public function test_smart_email_fallback_and_website_uptime_monitoring_owner_alerts(): void
+    {
+        $workspace = Workspace::where('slug', 'demo-agency')->firstOrFail();
+        $website = Website::where('workspace_id', $workspace->id)->firstOrFail();
+
+        // Case A: User selects 'custom_smtp' on website, but Custom SMTP is NOT configured on workspace.
+        // Wallet has 50 credits -> Should automatically fallback to 'system_wallet' and deduct 1 credit!
+        $workspace->update([
+            'email_credits_balance' => 50,
+            'custom_smtp_config' => null,
+        ]);
+
+        $website->update([
+            'uptime_monitoring_enabled' => true,
+            'uptime_status' => 'online',
+            'uptime_alert_email' => 'owner-alert@example.com',
+            'uptime_email_provider_mode' => 'custom_smtp',
+            'notify_on_downtime' => true,
+            'notify_on_recovery' => true,
+        ]);
+
+        // 1. Simulate Website/Server going DOWN
+        $downResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website->fresh(), forceSimulateOnline: false);
+        $this->assertFalse($downResult['is_online']);
+        $this->assertEquals('down', $downResult['uptime_status']);
+        $this->assertTrue($downResult['alert_sent']);
+
+        $workspace->refresh();
+        $website->refresh();
+        $this->assertEquals('down', $website->uptime_status);
+        $this->assertNotNull($website->last_downtime_notified_at);
+        // Because custom_smtp was unavailable, it auto-fell back to system_wallet and deducted 1 credit (50 -> 49)
+        $this->assertEquals(49, $workspace->email_credits_balance);
+
+        // Case B: User selects 'system_wallet' on website, but wallet balance becomes 0!
+        // However, Custom SMTP IS configured -> Should automatically fallback to 'custom_smtp' (0 credits needed)!
+        $workspace->update([
+            'email_credits_balance' => 0,
+            'custom_smtp_config' => [
+                'host' => 'smtp.owner-server.com',
+                'port' => 587,
+                'encryption' => 'tls',
+                'username' => 'noreply@owner-server.com',
+                'password' => 'smtp-pass-123',
+                'from_address' => 'noreply@owner-server.com',
+                'from_name' => 'Owner Server SMTP',
+            ],
+        ]);
+        $website->update([
+            'uptime_email_provider_mode' => 'system_wallet',
+        ]);
+
+        // 2. Simulate Website/Server RECOVERING back to ONLINE
+        $recoveryResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website->fresh(), forceSimulateOnline: true);
+        $this->assertTrue($recoveryResult['is_online']);
+        $this->assertEquals('online', $recoveryResult['uptime_status']);
+        $this->assertTrue($recoveryResult['alert_sent']);
+
+        $website->refresh();
+        $this->assertEquals('online', $website->uptime_status);
+        $this->assertEquals(0, $workspace->fresh()->email_credits_balance);
+
+        // 3. Real un-simulated check on fake domain acme-commerce.example.com must detect it as DOWN!
+        $realCheckResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website->fresh());
+        $this->assertFalse($realCheckResult['is_online']);
+        $this->assertEquals('down', $realCheckResult['uptime_status']);
+
+        $intel = WebsiteUptimeMonitorService::inspectSiteAndServerIntelligence($website->fresh());
+        $this->assertTrue($intel['is_fake_domain']);
+        $this->assertNull($intel['primary_ip']);
+        $this->assertArrayHasKey('protection_score', $intel);
+        $this->assertArrayHasKey('ssl', $intel);
     }
 }

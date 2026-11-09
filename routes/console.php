@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('sitevaulta:dispatch-scheduled-backups')->everyMinute()->withoutOverlapping();
+Schedule::command('sitevaulta:check-websites-uptime')->everyFiveMinutes()->withoutOverlapping();
