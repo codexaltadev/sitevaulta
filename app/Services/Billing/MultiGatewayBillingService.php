@@ -7,6 +7,7 @@ use App\Enums\PaymentGateway;
 use App\Enums\PaymentStatus;
 use App\Enums\SubscriptionStatus;
 use App\Models\Coupon;
+use App\Models\EmailPackage;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\Subscription;
@@ -207,6 +208,116 @@ class MultiGatewayBillingService
                     'currency' => $currency,
                 ],
                 workspaceId: $workspace->id
+            );
+
+            // Process Referral Purchase Reward if this workspace was referred!
+            EmailWalletService::processReferralRewardOnPurchase(
+                purchasingWorkspace: $workspace,
+                payment: $payment,
+                purchasedItemLabel: "{$plan->name} Subscription ({$cycle->label()})"
+            );
+
+            return $payment;
+        });
+    }
+
+    /**
+     * Processes a verified gateway payment for an Email Credit Package idempotently,
+     * deposits the credits into the Workspace's Digital Email Wallet, and triggers referral rewards if eligible.
+     */
+    public static function fulfillEmailPackagePayment(
+        Workspace $workspace,
+        EmailPackage $emailPackage,
+        PaymentGateway $gateway,
+        string $gatewayTransactionId,
+        string $idempotencyKey,
+        string $currency,
+        float $amount,
+        float $taxAmount = 0.0,
+        array $gatewayPayload = []
+    ): Payment {
+        return DB::transaction(function () use (
+            $workspace,
+            $emailPackage,
+            $gateway,
+            $gatewayTransactionId,
+            $idempotencyKey,
+            $currency,
+            $amount,
+            $taxAmount,
+            $gatewayPayload
+        ): Payment {
+            $existing = Payment::where('idempotency_key', $idempotencyKey)
+                ->orWhere(function ($q) use ($gatewayTransactionId) {
+                    if ($gatewayTransactionId !== '') {
+                        $q->where('gateway_transaction_id', $gatewayTransactionId);
+                    }
+                })
+                ->first();
+
+            if ($existing && $existing->status === PaymentStatus::Succeeded) {
+                return $existing;
+            }
+
+            $now = now()->utc();
+            $invoiceNumber = $existing?->invoice_number ?: ('INV-' . $now->format('Ymd') . '-' . strtoupper(Str::random(6)));
+            $totalCredits = $emailPackage->totalCredits();
+
+            $payment = Payment::updateOrCreate(
+                ['idempotency_key' => $idempotencyKey],
+                [
+                    'workspace_id' => $workspace->id,
+                    'subscription_id' => $workspace->currentSubscription?->id,
+                    'invoice_number' => $invoiceNumber,
+                    'gateway' => $gateway,
+                    'gateway_transaction_id' => $gatewayTransactionId,
+                    'currency' => $currency,
+                    'amount' => $amount,
+                    'discount_amount' => 0,
+                    'tax_amount' => $taxAmount,
+                    'status' => PaymentStatus::Succeeded,
+                    'gateway_payload' => array_merge($gatewayPayload, [
+                        'purchase_type' => 'email_package',
+                        'email_package_id' => $emailPackage->id,
+                        'email_package_code' => $emailPackage->code,
+                        'email_package_name' => $emailPackage->name,
+                        'credits_added' => $totalCredits,
+                    ]),
+                    'paid_at' => $now,
+                ]
+            );
+
+            EmailWalletService::creditWallet(
+                workspace: $workspace,
+                credits: $totalCredits,
+                type: 'package_purchase',
+                description: "Purchased {$emailPackage->name} (+{$totalCredits} Email Credits) — Invoice {$invoiceNumber}",
+                reference: $payment,
+                metadata: [
+                    'email_package_code' => $emailPackage->code,
+                    'credits_amount' => $emailPackage->credits_amount,
+                    'bonus_credits' => $emailPackage->bonus_credits,
+                    'invoice_number' => $invoiceNumber,
+                ]
+            );
+
+            AuditLogService::log(
+                event: 'email_wallet.package_purchased',
+                auditable: $payment,
+                metadata: [
+                    'package' => $emailPackage->code,
+                    'credits_added' => $totalCredits,
+                    'invoice' => $invoiceNumber,
+                    'amount' => $amount,
+                    'currency' => $currency,
+                ],
+                workspaceId: $workspace->id
+            );
+
+            EmailWalletService::processReferralRewardOnPurchase(
+                purchasingWorkspace: $workspace,
+                payment: $payment,
+                purchasedItemLabel: $emailPackage->name
             );
 
             return $payment;

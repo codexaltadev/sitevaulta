@@ -171,6 +171,15 @@ Route::get('/auth/google/callback', [GoogleDriveOAuthController::class, 'callbac
 Route::get('/vaultix/auth/google/callback', [GoogleDriveOAuthController::class, 'callback'])
     ->name('vaultix.google.oauth.callback');
 
+// Referral Link Tracking Route (/r/{code} or /ref/{code})
+Route::get('/r/{code}', function (string $code) {
+    $clean = strtoupper(trim($code));
+    session(['sitevaulta_referral_code' => $clean]);
+    cookie()->queue('sitevaulta_referral_code', $clean, 60 * 24 * 30);
+
+    return redirect('/app/register?ref=' . urlencode($clean));
+})->name('referral.redirect');
+
 // Multi-Gateway Billing Webhooks (SSLCOMMERZ BDT, Stripe USD, PayPal USD)
 Route::post('/webhooks/sslcommerz/ipn', [PaymentWebhookController::class, 'handleSslCommerzIpn'])
     ->name('webhooks.sslcommerz.ipn');

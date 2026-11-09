@@ -47,6 +47,16 @@ class WorkspaceForm
                             ->default('Asia/Dhaka')
                             ->required(),
 
+                        TextInput::make('email_credits_balance')
+                            ->label('Digital Email Wallet Credits Balance')
+                            ->numeric()
+                            ->default(50)
+                            ->required(),
+
+                        TextInput::make('referral_code')
+                            ->label('Workspace Referral Code')
+                            ->maxLength(40),
+
                         Toggle::make('is_suspended')
                             ->label('Suspend Workspace')
                             ->default(false),

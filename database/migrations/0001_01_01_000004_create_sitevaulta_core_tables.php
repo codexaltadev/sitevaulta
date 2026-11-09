@@ -262,6 +262,9 @@ return new class extends Migration
             $table->boolean('enable_encryption')->default(false);
             $table->text('encryption_passphrase')->nullable(); // encrypted
             $table->string('download_mode', 30)->default('one_time_token');
+            $table->string('notification_email', 191)->nullable();
+            $table->boolean('notify_on_success')->default(true);
+            $table->boolean('notify_on_failure')->default(true);
             $table->json('forecast_snapshot')->nullable();
             $table->string('status', 30)->default('active')->index();
             $table->timestamp('last_run_at')->nullable();
@@ -295,6 +298,9 @@ return new class extends Migration
             $table->foreignId('parent_run_id')->nullable()->constrained('backup_runs')->nullOnDelete();
             $table->string('trigger_type', 30)->default('scheduled');
             $table->string('trigger_tag', 100)->nullable();
+            $table->string('notification_email', 191)->nullable();
+            $table->boolean('notify_on_success')->default(true);
+            $table->boolean('notify_on_failure')->default(true);
             $table->string('backup_type', 30)->default('full');
             $table->string('scope', 30)->default('full_stack');
             $table->string('status', 30)->default('queued')->index();
@@ -312,6 +318,7 @@ return new class extends Migration
             $table->boolean('is_pruned')->default(false)->index();
             $table->string('error_code', 60)->nullable();
             $table->text('error_message')->nullable();
+            $table->timestamp('notification_sent_at')->nullable();
             $table->timestamps();
         });
 

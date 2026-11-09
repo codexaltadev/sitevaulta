@@ -152,8 +152,8 @@
                     <strong>{{ $workspace->name }}</strong>
                 </div>
                 <div class="row">
-                    <span>Selected Plan:</span>
-                    <strong>{{ $plan?->name ?? 'Subscription' }} ({{ ucfirst($cycle->value) }})</strong>
+                    <span>Selected Package:</span>
+                    <strong>{{ $payment->gateway_payload['email_package_name'] ?? ($plan?->name ? $plan->name . ' (' . ucfirst($cycle->value) . ')' : 'Subscription') }}</strong>
                 </div>
                 <div class="row">
                     <span>Invoice Reference:</span>

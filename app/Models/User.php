@@ -31,6 +31,8 @@ class User extends Authenticatable implements FilamentUser, HasTenants
         'two_factor_confirmed_at',
         'locale',
         'timezone',
+        'referral_code',
+        'referred_by_code',
         'is_suspended',
         'last_login_at',
     ];

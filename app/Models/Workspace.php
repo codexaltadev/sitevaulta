@@ -23,6 +23,12 @@ class Workspace extends Model implements HasName
         'owner_id',
         'billing_currency',
         'timezone',
+        'email_credits_balance',
+        'email_provider_mode',
+        'custom_smtp_config',
+        'referral_code',
+        'referred_by_workspace_id',
+        'referral_rewarded_at',
         'whitelabel_config',
         'is_suspended',
     ];
@@ -30,6 +36,9 @@ class Workspace extends Model implements HasName
     protected function casts(): array
     {
         return [
+            'email_credits_balance' => 'integer',
+            'custom_smtp_config' => 'encrypted:array',
+            'referral_rewarded_at' => 'datetime',
             'whitelabel_config' => 'array',
             'is_suspended' => 'boolean',
         ];
@@ -44,6 +53,10 @@ class Workspace extends Model implements HasName
             if (empty($workspace->slug)) {
                 $baseSlug = Str::slug($workspace->name ?: 'workspace');
                 $workspace->slug = $baseSlug . '-' . Str::lower(Str::random(5));
+            }
+            if (empty($workspace->referral_code)) {
+                $prefix = Str::upper(Str::substr(preg_replace('/[^A-Za-z0-9]/', '', $workspace->slug ?: 'SV'), 0, 6));
+                $workspace->referral_code = 'SV-' . ($prefix ?: 'USER') . '-' . Str::upper(Str::random(4));
             }
         });
     }
@@ -148,6 +161,28 @@ class Workspace extends Model implements HasName
     public function auditLogs(): HasMany
     {
         return $this->hasMany(AuditLog::class);
+    }
+
+    public function emailWalletTransactions(): HasMany
+    {
+        return $this->hasMany(EmailWalletTransaction::class);
+    }
+
+    public function referralsMade(): HasMany
+    {
+        return $this->hasMany(Referral::class, 'referrer_workspace_id');
+    }
+
+    public function referredByWorkspace(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'referred_by_workspace_id');
+    }
+
+    public function hasValidCustomSmtp(): bool
+    {
+        $cfg = $this->custom_smtp_config ?? [];
+
+        return ! empty($cfg['host']) && ! empty($cfg['from_address']);
     }
 
     public function hasActiveEntitlement(): bool

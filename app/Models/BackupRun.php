@@ -20,6 +20,10 @@ class BackupRun extends Model
         'parent_run_id',
         'trigger_type',
         'trigger_tag',
+        'email_provider_mode',
+        'notification_email',
+        'notify_on_success',
+        'notify_on_failure',
         'backup_type',
         'scope',
         'status',
@@ -37,6 +41,7 @@ class BackupRun extends Model
         'is_pruned',
         'error_code',
         'error_message',
+        'notification_sent_at',
     ];
 
     protected function casts(): array
@@ -44,6 +49,8 @@ class BackupRun extends Model
         return [
             'scope' => BackupScope::class,
             'status' => BackupRunStatus::class,
+            'notify_on_success' => 'boolean',
+            'notify_on_failure' => 'boolean',
             'source_files_count' => 'integer',
             'changed_files_count' => 'integer',
             'raw_source_size_bytes' => 'integer',
@@ -55,6 +62,7 @@ class BackupRun extends Model
             'duration_seconds' => 'integer',
             'retention_expires_at' => 'datetime',
             'is_pruned' => 'boolean',
+            'notification_sent_at' => 'datetime',
         ];
     }
 

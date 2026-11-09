@@ -6,6 +6,7 @@ use App\Enums\BillingCycle;
 use App\Enums\PaymentGateway;
 use App\Enums\PaymentStatus;
 use App\Models\Coupon;
+use App\Models\EmailPackage;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Services\Billing\MultiGatewayBillingService;
@@ -323,8 +324,10 @@ class BillingCheckoutController extends Controller
 
         $workspace = $payment->workspace;
         $payload = $payment->gateway_payload ?? [];
+        $isEmailPackage = ($payload['purchase_type'] ?? '') === 'email_package';
+        $emailPackage = $isEmailPackage ? EmailPackage::find($payload['email_package_id'] ?? null) : null;
 
-        $plan = Plan::findOrFail($payload['plan_id'] ?? null);
+        $plan = ! $isEmailPackage ? Plan::findOrFail($payload['plan_id'] ?? null) : null;
         $cycle = BillingCycle::tryFrom((string) ($payload['billing_cycle'] ?? 'monthly')) ?? BillingCycle::Monthly;
         $coupon = ! empty($payload['coupon_code'])
             ? Coupon::where('code', $payload['coupon_code'])->first()
@@ -388,6 +391,29 @@ class BillingCheckoutController extends Controller
                     Log::warning('PayPal Order Capture Warning: ' . $e->getMessage());
                 }
             }
+        }
+
+        if ($isEmailPackage && $emailPackage) {
+            MultiGatewayBillingService::fulfillEmailPackagePayment(
+                workspace: $workspace,
+                emailPackage: $emailPackage,
+                gateway: $payment->gateway,
+                gatewayTransactionId: $payment->gateway_transaction_id,
+                idempotencyKey: $payment->idempotency_key,
+                currency: $payment->currency,
+                amount: (float) $payment->amount,
+                taxAmount: (float) $payment->tax_amount,
+                gatewayPayload: array_merge($payload, [
+                    'sandbox_verified' => true,
+                    'payment_method' => $paymentMethod,
+                    'val_id' => $valId ?: null,
+                    'bank_tran_id' => $bankTranId ?: null,
+                    'card_issuer' => $request->input('card_issuer'),
+                    'completed_at' => now()->utc()->toIso8601String(),
+                ])
+            );
+
+            return redirect("/app/{$workspace->slug}/email-wallet?payment_status=success&invoice={$payment->invoice_number}", 303);
         }
 
         MultiGatewayBillingService::fulfillSuccessfulPayment(

@@ -261,6 +261,74 @@ class BackupPolicyForm
                                             ->visible(fn (Get $get): bool => $get('scope') !== BackupScope::DatabaseOnly->value)
                                             ->columnSpanFull(),
                                     ]),
+
+                                Section::make('Run Email Alert Notifications (Success & Failure)')
+                                    ->description('Set an email address for this policy to receive automatic alerts after each backup run. Choose between your own free Custom SMTP or SiteVaulta System Email Wallet credits, and toggle Success & Failed alerts ON/OFF individually.')
+                                    ->columns(2)
+                                    ->schema([
+                                        Placeholder::make('email_wallet_status_banner')
+                                            ->hiddenLabel()
+                                            ->columnSpanFull()
+                                            ->content(function (): HtmlString {
+                                                /** @var Workspace|null $ws */
+                                                $ws = Filament::getTenant();
+                                                $credits = (int) ($ws?->email_credits_balance ?? 0);
+                                                $hasSmtp = $ws?->hasValidCustomSmtp() ?? false;
+                                                $walletUrl = $ws ? "/app/{$ws->slug}/email-wallet" : '#';
+                                                $creditColor = $credits > 10 ? 'var(--sv-success)' : ($credits > 0 ? 'var(--sv-warning)' : 'var(--sv-danger)');
+                                                $smtpBadge = $hasSmtp
+                                                    ? "<span style='color:var(--sv-success);font-weight:700;'>✅ Configured (Free Unlimited)</span>"
+                                                    : "<span style='color:var(--sv-warning);font-weight:700;'>⚠️ Not Set</span>";
+
+                                                return new HtmlString(
+                                                    "<div style='padding:12px 14px;border-radius:8px;background:var(--sv-surface);border:1px solid var(--sv-border);font-size:13px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;'>".
+                                                    "<div><strong>💳 Digital Email Wallet:</strong> <span style='color:{$creditColor};font-weight:800;'>{$credits} Credits</span> &nbsp;|&nbsp; <strong>🔧 Custom SMTP:</strong> {$smtpBadge}</div>".
+                                                    "<a href='".e($walletUrl)."' style='color:var(--sv-primary);font-weight:700;text-decoration:underline;'>Manage Email Wallet, Custom SMTP &amp; Referrals &rarr;</a>".
+                                                    '</div>'
+                                                );
+                                            }),
+
+                                        Select::make('email_provider_mode')
+                                            ->label('Email Delivery Method (SMTP vs System Email Package)')
+                                            ->options(function (): array {
+                                                /** @var Workspace|null $ws */
+                                                $ws = Filament::getTenant();
+                                                $credits = (int) ($ws?->email_credits_balance ?? 0);
+                                                $defaultLabel = ($ws?->email_provider_mode === 'custom_smtp')
+                                                    ? 'My Custom SMTP — Free'
+                                                    : "System Email Wallet — {$credits} Credits Available";
+
+                                                return [
+                                                    'workspace_default' => "Use Workspace Default ({$defaultLabel})",
+                                                    'custom_smtp' => '🔧 My Own Custom SMTP Server (100% Free & Unlimited)',
+                                                    'system_wallet' => "💳 SiteVaulta System Email Package (Deducts 1 Wallet Credit / Email — Balance: {$credits})",
+                                                ];
+                                            })
+                                            ->default('workspace_default')
+                                            ->helperText('Use your own SMTP server for free, or use SiteVaulta System Email powered by your Digital Email Wallet credits (buy packages or earn free credits via referrals).')
+                                            ->columnSpanFull(),
+
+                                        TextInput::make('notification_email')
+                                            ->label('Notification Email Address (Per Run Alert)')
+                                            ->email()
+                                            ->placeholder(fn (): string => auth()->user()?->email ?: 'alerts@youragency.com')
+                                            ->default(fn (): ?string => auth()->user()?->email)
+                                            ->maxLength(191)
+                                            ->helperText('Emails for every run of this policy will be sent to this address based on the toggles below.')
+                                            ->columnSpanFull(),
+
+                                        Toggle::make('notify_on_success')
+                                            ->label('Send Email on Backup Success')
+                                            ->helperText('Turn ON to send an email when a backup run completes and verifies successfully.')
+                                            ->default(true)
+                                            ->onColor('success'),
+
+                                        Toggle::make('notify_on_failure')
+                                            ->label('Send Email on Backup Failed')
+                                            ->helperText('Turn ON to send an immediate alert email if a backup run fails.')
+                                            ->default(true)
+                                            ->onColor('danger'),
+                                    ]),
                             ]),
 
                         // RIGHT COLUMN (5/12): High-Contrast Live Storage & Transfer Forecaster

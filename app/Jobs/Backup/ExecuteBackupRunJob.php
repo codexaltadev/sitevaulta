@@ -35,7 +35,10 @@ class ExecuteBackupRunJob implements ShouldQueue
     public function __construct(
         public int $backupPolicyId,
         public string $triggerType = 'scheduled',
-        public ?string $triggerTag = null
+        public ?string $triggerTag = null,
+        public ?string $overrideNotificationEmail = null,
+        public ?bool $overrideNotifyOnSuccess = null,
+        public ?bool $overrideNotifyOnFailure = null
     ) {
         $this->tries = (int) SystemSettingsService::get('backup_engine', 'max_retry_attempts', 3);
         $this->timeout = (int) SystemSettingsService::get('backup_engine', 'job_timeout_seconds', 7200);
@@ -77,6 +80,10 @@ class ExecuteBackupRunJob implements ShouldQueue
                 'parent_run_id' => $parentRun?->id,
                 'trigger_type' => $this->triggerType,
                 'trigger_tag' => $this->triggerTag,
+                'email_provider_mode' => $policy->email_provider_mode ?: 'workspace_default',
+                'notification_email' => $this->overrideNotificationEmail ?? $policy->notification_email,
+                'notify_on_success' => $this->overrideNotifyOnSuccess ?? (bool) ($policy->notify_on_success ?? true),
+                'notify_on_failure' => $this->overrideNotifyOnFailure ?? (bool) ($policy->notify_on_failure ?? true),
                 'backup_type' => $backupType,
                 'scope' => $policy->scope,
                 'status' => BackupRunStatus::Connecting,
@@ -215,10 +222,14 @@ class ExecuteBackupRunJob implements ShouldQueue
             } else {
                 WorkspaceAlertDispatcher::dispatch($policy->workspace, 'backup_succeeded', [
                     'website_name' => $policy->website->name,
+                    'domain' => $policy->website->domain,
+                    'policy_name' => $policy->name,
                     'run_uuid' => $run->uuid,
                     'archive_size' => round($package['size_bytes'] / 1024, 2).' KB',
                 ]);
             }
+
+            WorkspaceAlertDispatcher::sendPolicyRunEmail($policy, $run, isSuccess: true);
 
             AuditLogService::log(
                 event: 'backup.run.completed',
@@ -248,9 +259,11 @@ class ExecuteBackupRunJob implements ShouldQueue
                     'status' => $run->status->value,
                     'error_message' => $e->getMessage(),
                 ]);
+
+                WorkspaceAlertDispatcher::sendPolicyRunEmail($policy, $run, isSuccess: false, errorMessage: $e->getMessage());
             }
 
-            return $run;
+            return $run?->fresh();
         } finally {
             // 9. Guaranteed Zero-Retention Ephemeral Cleanup on SiteVaulta Worker
             if ($stagingDir !== null) {

@@ -70,6 +70,10 @@ class ManageSystemSettings extends Page
             'expired_metadata_retention_days' => SystemSettingsService::get('trial_billing', 'expired_metadata_retention_days', 30),
             'tax_percentage' => SystemSettingsService::get('trial_billing', 'tax_percentage', 0.0),
             'renewal_window_days' => SystemSettingsService::get('trial_billing', 'renewal_window_days', 7),
+            'welcome_free_email_credits' => SystemSettingsService::get('email_wallet_referral', 'welcome_free_email_credits', 50),
+            'referral_signup_bonus_credits' => SystemSettingsService::get('email_wallet_referral', 'referral_signup_bonus_credits', 25),
+            'referral_purchase_referrer_credits' => SystemSettingsService::get('email_wallet_referral', 'referral_purchase_referrer_credits', 500),
+            'referral_purchase_referee_credits' => SystemSettingsService::get('email_wallet_referral', 'referral_purchase_referee_credits', 200),
 
             // Tab 3: Backup Engine & Forecast Parameters
             'default_compression_ratio' => SystemSettingsService::get('backup_engine', 'default_compression_ratio', 0.60),
@@ -232,6 +236,39 @@ class ManageSystemSettings extends Page
                                             ->numeric()
                                             ->minValue(1)
                                             ->maxValue(30)
+                                            ->required(),
+                                    ]),
+
+                                Section::make('Digital Email Wallet & Referral Reward Credits (100% Dynamic)')
+                                    ->description('Configure how many free System Email Wallet credits are granted on workspace registration, referral signup, and referral package purchase.')
+                                    ->columns(2)
+                                    ->schema([
+                                        TextInput::make('welcome_free_email_credits')
+                                            ->label('New Workspace Welcome Starter Email Credits')
+                                            ->helperText('Free System Email credits automatically added when a new workspace is created.')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->required(),
+
+                                        TextInput::make('referral_signup_bonus_credits')
+                                            ->label('Referral Signup Bonus Credits (To Referrer)')
+                                            ->helperText('Email credits awarded immediately to the referrer when someone registers with their referral code.')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->required(),
+
+                                        TextInput::make('referral_purchase_referrer_credits')
+                                            ->label('Referral Package Purchase Reward (To Referrer)')
+                                            ->helperText('Email credits awarded to the referrer when their referred user purchases any Subscription Plan or Email Package.')
+                                            ->numeric()
+                                            ->minValue(0)
+                                            ->required(),
+
+                                        TextInput::make('referral_purchase_referee_credits')
+                                            ->label('Referral First Purchase Bonus (To New Referred User)')
+                                            ->helperText('Bonus email credits awarded to the referred user when they purchase their first Subscription Plan or Email Package.')
+                                            ->numeric()
+                                            ->minValue(0)
                                             ->required(),
                                     ]),
                             ]),
@@ -532,6 +569,11 @@ class ManageSystemSettings extends Page
         SystemSettingsService::set('trial_billing', 'expired_metadata_retention_days', (int) ($state['expired_metadata_retention_days'] ?? 30), 'integer', false, false, updatedBy: $adminId);
         SystemSettingsService::set('trial_billing', 'tax_percentage', (float) $state['tax_percentage'], 'float', false, true, updatedBy: $adminId);
         SystemSettingsService::set('trial_billing', 'renewal_window_days', (int) ($state['renewal_window_days'] ?? 7), 'integer', false, true, updatedBy: $adminId);
+
+        SystemSettingsService::set('email_wallet_referral', 'welcome_free_email_credits', (int) ($state['welcome_free_email_credits'] ?? 50), 'integer', false, true, updatedBy: $adminId);
+        SystemSettingsService::set('email_wallet_referral', 'referral_signup_bonus_credits', (int) ($state['referral_signup_bonus_credits'] ?? 25), 'integer', false, true, updatedBy: $adminId);
+        SystemSettingsService::set('email_wallet_referral', 'referral_purchase_referrer_credits', (int) ($state['referral_purchase_referrer_credits'] ?? 500), 'integer', false, true, updatedBy: $adminId);
+        SystemSettingsService::set('email_wallet_referral', 'referral_purchase_referee_credits', (int) ($state['referral_purchase_referee_credits'] ?? 200), 'integer', false, true, updatedBy: $adminId);
 
         SystemSettingsService::set('backup_engine', 'default_compression_ratio', (float) $state['default_compression_ratio'], 'float', false, true, updatedBy: $adminId);
         SystemSettingsService::set('backup_engine', 'default_incremental_delta_rate', (float) $state['default_incremental_delta_rate'], 'float', false, true, updatedBy: $adminId);

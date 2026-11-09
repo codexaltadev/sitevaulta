@@ -63,6 +63,18 @@ class BackupRunsTable
                     ->boolean()
                     ->trueColor('danger')
                     ->falseColor('success'),
+                TextColumn::make('notification_email')
+                    ->label('Alert Email')
+                    ->placeholder('None')
+                    ->description(fn (BackupRun $record): string => $record->notification_email
+                        ? ($record->notification_sent_at
+                            ? 'Sent at '.$record->notification_sent_at->format('H:i:s')
+                            : sprintf(
+                                'Success: %s | Failed: %s',
+                                $record->notify_on_success ? 'ON' : 'OFF',
+                                $record->notify_on_failure ? 'ON' : 'OFF'
+                            ))
+                        : 'No email set'),
                 TextColumn::make('completed_at')
                     ->label('Completed At')
                     ->dateTime(),

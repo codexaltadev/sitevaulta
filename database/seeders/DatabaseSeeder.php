@@ -19,6 +19,7 @@ use App\Models\StorageConnection;
 use App\Models\User;
 use App\Models\Website;
 use App\Models\Workspace;
+use App\Services\Billing\EmailWalletService;
 use App\Services\Billing\EntitlementService;
 use App\Services\Settings\SystemSettingsService;
 use App\Services\Settings\WorkspaceSettingsService;
@@ -34,6 +35,7 @@ class DatabaseSeeder extends Seeder
         $this->seedDynamicSystemSettings();
         $this->seedEmailTemplates();
         $this->seedPlans();
+        EmailWalletService::seedDefaultEmailPackages();
         $this->seedGlobalBackupTemplates();
         $this->seedRolesAndUsers();
     }
@@ -60,6 +62,10 @@ class DatabaseSeeder extends Seeder
             ['trial_billing', 'expired_metadata_retention_days', 30, 'integer', false, false, 'Expired Account Metadata Retention (Days)', 'Days to preserve workspace metadata after subscription expires'],
             ['trial_billing', 'tax_percentage', 0.0, 'float', false, true, 'Tax / VAT Percentage (%)', 'Applied to subscription checkouts if greater than 0'],
             ['trial_billing', 'renewal_window_days', 7, 'integer', false, true, 'Same-Plan Renewal Window (Days)', 'Days before expiry when same-plan renewal unlocks'],
+            ['email_wallet_referral', 'welcome_free_email_credits', 50, 'integer', false, true, 'Welcome Free Email Credits', 'Starter System Email credits granted to every new workspace'],
+            ['email_wallet_referral', 'referral_signup_bonus_credits', 25, 'integer', false, true, 'Referral Signup Bonus Credits', 'Email credits awarded to referrer when a workspace registers'],
+            ['email_wallet_referral', 'referral_purchase_referrer_credits', 500, 'integer', false, true, 'Referral Purchase Reward (Referrer Credits)', 'Email credits awarded to referrer when referred user purchases a package'],
+            ['email_wallet_referral', 'referral_purchase_referee_credits', 200, 'integer', false, true, 'Referral Purchase Bonus (New User Credits)', 'Bonus email credits awarded to referred user on first package purchase'],
 
             // Group 3: Backup Engine & Forecast Defaults
             ['backup_engine', 'default_compression_ratio', 0.60, 'float', false, true, 'Default Compression Ratio', '0.60 = 40% compression savings for pre-backup forecast'],
@@ -120,6 +126,13 @@ class DatabaseSeeder extends Seeder
                 'subject' => 'Welcome to {app_name} — Your {trial_days}-Day Free Trial is Active!',
                 'body_html' => '<p>Hello <strong>{user_name}</strong>,</p><p>Your workspace <strong>{workspace_name}</strong> has been created with a {trial_days}-day free trial. Verify your first website and connect your storage to schedule automated backups.</p>',
                 'available_placeholders' => ['app_name', 'user_name', 'workspace_name', 'trial_days'],
+            ],
+            [
+                'code' => 'backup_succeeded',
+                'name' => 'Backup Run Succeeded Alert',
+                'subject' => '[SUCCESS] Backup Completed & Verified for {website_name} ({domain})',
+                'body_html' => '<p>A backup run (<code>{run_uuid}</code>) for <strong>{website_name}</strong> ({domain}) under policy <strong>{policy_name}</strong> completed and verified successfully.</p><p><strong>Archive Size:</strong> {archive_size}</p>',
+                'available_placeholders' => ['website_name', 'domain', 'policy_name', 'run_uuid', 'archive_size'],
             ],
             [
                 'code' => 'backup_failed',
@@ -319,6 +332,7 @@ class DatabaseSeeder extends Seeder
             'Workspace',
             'User',
             'Plan',
+            'EmailPackage',
             'Coupon',
             'Payment',
             'BackupRun',
@@ -381,6 +395,7 @@ class DatabaseSeeder extends Seeder
             $admin->id => ['role' => WorkspaceRole::Owner->value],
         ]);
         WorkspaceSettingsService::initializeDefaultsForWorkspace($adminWorkspace);
+        EmailWalletService::initializeWelcomeCredits($adminWorkspace);
         if (! $adminWorkspace->currentSubscription) {
             EntitlementService::provisionFreeTrial($adminWorkspace);
         }
@@ -409,6 +424,7 @@ class DatabaseSeeder extends Seeder
             $customer->id => ['role' => WorkspaceRole::Owner->value],
         ]);
         WorkspaceSettingsService::initializeDefaultsForWorkspace($demoWorkspace);
+        EmailWalletService::initializeWelcomeCredits($demoWorkspace);
         if (! $demoWorkspace->currentSubscription) {
             EntitlementService::provisionFreeTrial($demoWorkspace);
         }

@@ -4,6 +4,7 @@ namespace App\Filament\App\Pages\Tenancy;
 
 use App\Enums\WorkspaceRole;
 use App\Models\Workspace;
+use App\Services\Billing\EmailWalletService;
 use App\Services\Billing\EntitlementService;
 use App\Services\Security\AuditLogService;
 use App\Services\Settings\SystemSettingsService;
@@ -66,6 +67,12 @@ class RegisterWorkspace extends RegisterTenant
                     ->default(fn () => SystemSettingsService::get('general', 'default_timezone', 'Asia/Dhaka'))
                     ->searchable()
                     ->required(),
+
+                TextInput::make('referral_code_used')
+                    ->label('Referral Code (Optional — Get Bonus Email Wallet Credits!)')
+                    ->placeholder('e.g., SV-DEMOAG-8X2K')
+                    ->default(fn (): ?string => request()->query('ref') ?: session('sitevaulta_referral_code') ?: request()->cookie('sitevaulta_referral_code'))
+                    ->helperText('If a friend or agency referred you, enter their code here to unlock bonus System Email Wallet credits when you purchase a package.'),
             ]);
     }
 
@@ -87,6 +94,12 @@ class RegisterWorkspace extends RegisterTenant
 
         WorkspaceSettingsService::initializeDefaultsForWorkspace($workspace);
         EntitlementService::provisionFreeTrial($workspace);
+        EmailWalletService::initializeWelcomeCredits($workspace);
+
+        $refCode = trim((string) ($data['referral_code_used'] ?? session('sitevaulta_referral_code') ?? request()->cookie('sitevaulta_referral_code') ?? ''));
+        if ($refCode !== '') {
+            EmailWalletService::applyReferralCodeToWorkspace($workspace, $refCode, $user);
+        }
 
         AuditLogService::log(
             event: 'workspace.created',
