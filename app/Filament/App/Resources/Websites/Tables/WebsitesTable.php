@@ -11,6 +11,7 @@ use App\Services\Security\WebsiteSecurityScannerService;
 use App\Services\Verification\DomainVerificationService;
 use App\Services\Verification\WebsiteUptimeMonitorService;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Placeholder;
@@ -132,145 +133,151 @@ class WebsitesTable
                         }
                     }),
 
-                Action::make('clientReport')
-                    ->label('Client PDF Report')
-                    ->icon(Heroicon::OutlinedDocumentChartBar)
-                    ->color('primary')
-                    ->url(fn (Website $record): string => route('websites.client-report.view', [
-                        'workspaceSlug' => $record->workspace?->slug ?? 'demo-agency',
-                        'websiteUuid' => $record->uuid,
-                    ]))
-                    ->openUrlInNewTab(),
+                ActionGroup::make([
+                    Action::make('clientReport')
+                        ->label('Client PDF Report')
+                        ->icon(Heroicon::OutlinedDocumentChartBar)
+                        ->color('primary')
+                        ->url(fn (Website $record): string => route('websites.client-report.view', [
+                            'workspaceSlug' => $record->workspace?->slug ?? 'demo-agency',
+                            'websiteUuid' => $record->uuid,
+                        ]))
+                        ->openUrlInNewTab(),
 
-                Action::make('scanMalwareReadOnly')
-                    ->label('Scan Malware (Read-Only)')
-                    ->icon(Heroicon::OutlinedShieldCheck)
-                    ->color('warning')
-                    ->action(function (Website $record): void {
-                        $secResult = WebsiteSecurityScannerService::scanWebsiteAndServer($record);
+                    Action::make('scanMalwareReadOnly')
+                        ->label('Scan Malware (Read-Only)')
+                        ->icon(Heroicon::OutlinedShieldCheck)
+                        ->color('warning')
+                        ->action(function (Website $record): void {
+                            $secResult = WebsiteSecurityScannerService::scanWebsiteAndServer($record);
 
-                        if ($secResult['critical_count'] > 0) {
-                            Notification::make()
-                                ->title("🚨 {$secResult['critical_count']} Suspicious File(s) / Exposure(s) Detected!")
-                                ->body('100% Read-Only Report generated. Click "View" to see exact file locations on your server. No files were deleted or modified.')
-                                ->danger()
-                                ->persistent()
-                                ->send();
-                        } else {
-                            Notification::make()
-                                ->title('🛡️ Read-Only Security Scan Clean (0 Malware / 0 Web-Shells)')
-                                ->body('No web-shells, obfuscated malware, or exposed .env/.git files were detected.')
-                                ->success()
-                                ->send();
+                            if ($secResult['critical_count'] > 0) {
+                                Notification::make()
+                                    ->title("🚨 {$secResult['critical_count']} Suspicious File(s) / Exposure(s) Detected!")
+                                    ->body('100% Read-Only Report generated. Click "View" to see exact file locations on your server. No files were deleted or modified.')
+                                    ->danger()
+                                    ->persistent()
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->title('🛡️ Read-Only Security Scan Clean (0 Malware / 0 Web-Shells)')
+                                    ->body('No web-shells, obfuscated malware, or exposed .env/.git files were detected.')
+                                    ->success()
+                                    ->send();
 
-                            if ($record->workspace) {
-                                WorkspaceAlertDispatcher::sendDatabaseNotificationToWorkspace(
-                                    workspace: $record->workspace,
-                                    title: "🛡️ Security Scan Clean: {$record->name} ({$record->domain})",
-                                    body: '100% Read-Only Scan completed: 0 Malware, 0 Web-Shells, and 0 Exposed .env/.git files detected.',
-                                    status: 'success'
-                                );
+                                if ($record->workspace) {
+                                    WorkspaceAlertDispatcher::sendDatabaseNotificationToWorkspace(
+                                        workspace: $record->workspace,
+                                        title: "🛡️ Security Scan Clean: {$record->name} ({$record->domain})",
+                                        body: '100% Read-Only Scan completed: 0 Malware, 0 Web-Shells, and 0 Exposed .env/.git files detected.',
+                                        status: 'success'
+                                    );
+                                }
                             }
-                        }
-                    }),
+                        }),
 
-                Action::make('checkLiveUptime')
-                    ->label('Check Live Status')
-                    ->icon(Heroicon::OutlinedSignal)
-                    ->color('success')
-                    ->action(function (Website $record): void {
-                        $result = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($record);
+                    Action::make('checkLiveUptime')
+                        ->label('Check Live Status')
+                        ->icon(Heroicon::OutlinedSignal)
+                        ->color('success')
+                        ->action(function (Website $record): void {
+                            $result = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($record);
 
-                        if ($result['is_online']) {
+                            if ($result['is_online']) {
+                                Notification::make()
+                                    ->title('🟢 Domain & Server are Live!')
+                                    ->body($result['message'])
+                                    ->success()
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->title('🔴 Domain or Server is Unreachable!')
+                                    ->body($result['message'].($result['email_notified'] ? ' (Alert email sent to owner)' : ''))
+                                    ->danger()
+                                    ->send();
+                            }
+                        }),
+
+                    Action::make('verifyDomain')
+                        ->label('Verify Ownership')
+                        ->icon(Heroicon::OutlinedCheckBadge)
+                        ->color('success')
+                        ->schema([
+                            Placeholder::make('challenge_instructions')
+                                ->label('Verification Challenge Token')
+                                ->content(function (Website $record): HtmlString {
+                                    $challenge = DomainVerificationService::ensureChallengeExists($record);
+
+                                    return new HtmlString(sprintf(
+                                        '<div style="padding:14px;border-radius:8px;background:var(--sv-bg);color:var(--sv-text);border:1px solid var(--sv-border);line-height:1.7;">'
+                                        .'<div><strong style="color:var(--sv-primary);">Token:</strong> <code>%s</code></div>'
+                                        .'<div><strong style="color:var(--sv-primary);">DNS TXT Host:</strong> <code>%s</code></div>'
+                                        .'<div><strong style="color:var(--sv-primary);">File Path:</strong> <code>%s</code></div>'
+                                        .'<div><strong style="color:var(--sv-primary);">Meta Tag:</strong> <code>&lt;meta name="%s" content="%s"&gt;</code></div>'
+                                        .'</div>',
+                                        e($challenge->token),
+                                        e($challenge->dns_host),
+                                        e($challenge->file_path),
+                                        e($challenge->meta_tag_name),
+                                        e($challenge->token)
+                                    ));
+                                }),
+
+                            Select::make('method')
+                                ->label('Select Verification Method to Check')
+                                ->options(VerificationMethod::options())
+                                ->default(VerificationMethod::DnsTxt->value)
+                                ->required(),
+                        ])
+                        ->action(function (Website $record, array $data): void {
+                            $method = VerificationMethod::from($data['method']);
+                            $result = DomainVerificationService::verifyWebsite($record, $method);
+
+                            if ($result->verified) {
+                                Notification::make()
+                                    ->title('Domain Ownership Verified!')
+                                    ->body($result->message)
+                                    ->success()
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->title('Verification Check Failed')
+                                    ->body($result->message)
+                                    ->danger()
+                                    ->send();
+                            }
+                        }),
+
+                    Action::make('generateWebhookToken')
+                        ->label('CI/CD Pre-Deploy Token')
+                        ->icon(Heroicon::OutlinedKey)
+                        ->color('info')
+                        ->requiresConfirmation()
+                        ->modalHeading('Generate CI/CD Pre-Deploy Webhook Token')
+                        ->modalDescription('Generates a new bearer token so you can trigger an instant pre-deployment backup from GitHub Actions or GitLab CI.')
+                        ->action(function (Website $record): void {
+                            $plainToken = 'sv_deploy_'.Str::random(36);
+                            $record->update([
+                                'webhook_secret_hash' => Hash::make($plainToken),
+                            ]);
+
+                            $endpoint = url("/api/v1/websites/{$record->uuid}/trigger-backup");
+
                             Notification::make()
-                                ->title('🟢 Domain & Server are Live!')
-                                ->body($result['message'])
+                                ->title('Pre-Deploy Webhook Token Generated (Copy Now)')
+                                ->body("Endpoint: POST {$endpoint} | Bearer Token: {$plainToken}")
+                                ->persistent()
                                 ->success()
                                 ->send();
-                        } else {
-                            Notification::make()
-                                ->title('🔴 Domain or Server is Unreachable!')
-                                ->body($result['message'].($result['email_notified'] ? ' (Alert email sent to owner)' : ''))
-                                ->danger()
-                                ->send();
-                        }
-                    }),
+                        }),
 
-                Action::make('verifyDomain')
-                    ->label('Verify Ownership')
-                    ->icon(Heroicon::OutlinedCheckBadge)
-                    ->color('success')
-                    ->schema([
-                        Placeholder::make('challenge_instructions')
-                            ->label('Verification Challenge Token')
-                            ->content(function (Website $record): HtmlString {
-                                $challenge = DomainVerificationService::ensureChallengeExists($record);
-
-                                return new HtmlString(sprintf(
-                                    '<div style="padding:14px;border-radius:8px;background:var(--sv-bg);color:var(--sv-text);border:1px solid var(--sv-border);line-height:1.7;">'
-                                    .'<div><strong style="color:var(--sv-primary);">Token:</strong> <code>%s</code></div>'
-                                    .'<div><strong style="color:var(--sv-primary);">DNS TXT Host:</strong> <code>%s</code></div>'
-                                    .'<div><strong style="color:var(--sv-primary);">File Path:</strong> <code>%s</code></div>'
-                                    .'<div><strong style="color:var(--sv-primary);">Meta Tag:</strong> <code>&lt;meta name="%s" content="%s"&gt;</code></div>'
-                                    .'</div>',
-                                    e($challenge->token),
-                                    e($challenge->dns_host),
-                                    e($challenge->file_path),
-                                    e($challenge->meta_tag_name),
-                                    e($challenge->token)
-                                ));
-                            }),
-
-                        Select::make('method')
-                            ->label('Select Verification Method to Check')
-                            ->options(VerificationMethod::options())
-                            ->default(VerificationMethod::DnsTxt->value)
-                            ->required(),
-                    ])
-                    ->action(function (Website $record, array $data): void {
-                        $method = VerificationMethod::from($data['method']);
-                        $result = DomainVerificationService::verifyWebsite($record, $method);
-
-                        if ($result->verified) {
-                            Notification::make()
-                                ->title('Domain Ownership Verified!')
-                                ->body($result->message)
-                                ->success()
-                                ->send();
-                        } else {
-                            Notification::make()
-                                ->title('Verification Check Failed')
-                                ->body($result->message)
-                                ->danger()
-                                ->send();
-                        }
-                    }),
-
-                Action::make('generateWebhookToken')
-                    ->label('CI/CD Pre-Deploy Token')
-                    ->icon(Heroicon::OutlinedKey)
-                    ->color('info')
-                    ->requiresConfirmation()
-                    ->modalHeading('Generate CI/CD Pre-Deploy Webhook Token')
-                    ->modalDescription('Generates a new bearer token so you can trigger an instant pre-deployment backup from GitHub Actions or GitLab CI.')
-                    ->action(function (Website $record): void {
-                        $plainToken = 'sv_deploy_'.Str::random(36);
-                        $record->update([
-                            'webhook_secret_hash' => Hash::make($plainToken),
-                        ]);
-
-                        $endpoint = url("/api/v1/websites/{$record->uuid}/trigger-backup");
-
-                        Notification::make()
-                            ->title('Pre-Deploy Webhook Token Generated (Copy Now)')
-                            ->body("Endpoint: POST {$endpoint} | Bearer Token: {$plainToken}")
-                            ->persistent()
-                            ->success()
-                            ->send();
-                    }),
-
-                EditAction::make(),
-                DeleteAction::make(),
+                    EditAction::make(),
+                    DeleteAction::make(),
+                ])
+                    ->label('Tools & Actions')
+                    ->icon(Heroicon::OutlinedEllipsisVertical)
+                    ->color('gray')
+                    ->button(),
             ]);
     }
 

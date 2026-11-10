@@ -20,6 +20,23 @@
     const header = document.querySelector('.site-header');
     const burger = document.querySelector('.nav-burger');
     const navLinks = document.querySelectorAll('.nav-links a');
+    const navDropdown = document.querySelector('[data-nav-dropdown]');
+    const navDropdownBtn = document.querySelector('[data-nav-dropdown-btn]');
+
+    if (navDropdown && navDropdownBtn) {
+        navDropdownBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const open = navDropdown.classList.toggle('is-open');
+            navDropdownBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        });
+
+        document.addEventListener('click', function (e) {
+            if (!navDropdown.contains(e.target)) {
+                navDropdown.classList.remove('is-open');
+                navDropdownBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
 
     if (burger) {
         burger.addEventListener('click', function () {
@@ -31,6 +48,10 @@
             link.addEventListener('click', () => {
                 document.body.classList.remove('nav-open');
                 burger.setAttribute('aria-expanded', 'false');
+                if (navDropdown && navDropdownBtn) {
+                    navDropdown.classList.remove('is-open');
+                    navDropdownBtn.setAttribute('aria-expanded', 'false');
+                }
             });
         });
     }
@@ -369,7 +390,14 @@
 <span class="t-prompt">$</span> php artisan sitevaulta:verify-connector --website=mywebsite.com
 <span class="t-ok">✓ SFTP Connection: Latency 14ms (SSH-2.0-OpenSSH_9.6)</span>
 <span class="t-ok">✓ MySQL Connection: 8.0.36-28 • LOCK TABLES, SELECT, TRIGGER Granted</span>
-<span class="t-ok">✓ Storage Destination: Google Drive Folder "sitevaulta-backups" Write-OK</span><span class="cursor"></span>`
+<span class="t-ok">✓ Storage Destination: Google Drive Folder "sitevaulta-backups" Write-OK</span><span class="cursor"></span>`,
+
+        security: `<span class="t-comment"># 24/7 Live Domain, Server &amp; SSL Expiry Monitor + 100% Read-Only Malware Scan</span>
+<span class="t-prompt">$</span> php artisan sitevaulta:check-websites-uptime
+<span class="t-ok">✓ jtest.daffodil.university: ONLINE (HTTP 200 • 42ms) | cPanel:2083 Reachable</span>
+<span class="t-ok">✓ SSL Certificate Guard: Valid Let's Encrypt SSL (78 Days Remaining)</span>
+<span class="t-info">✓ 100% Read-Only Security Scan: 0 Web-Shells, 0 Obfuscated Malware, /.env Protected</span>
+<span class="t-ok">✓ Smart Email Failover (Custom SMTP ⇄ Digital Wallet) &amp; In-App Bell Active!</span><span class="cursor"></span>`
     };
 
     terminalTabs.forEach(tab => {
@@ -396,6 +424,28 @@
             card.style.setProperty('--my', y + 'px');
         });
     });
+
+    // -------------------------------------------------------------------------
+    // 8. Interactive Live Radar, Security & Smart Email Showcase Tabs
+    // -------------------------------------------------------------------------
+    const intelTabs = document.querySelectorAll('[data-intel-tab]');
+    const intelPanes = document.querySelectorAll('[data-intel-pane]');
+
+    if (intelTabs.length > 0 && intelPanes.length > 0) {
+        intelTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetKey = tab.getAttribute('data-intel-tab');
+                intelTabs.forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+                intelPanes.forEach(pane => {
+                    if (pane.getAttribute('data-intel-pane') === targetKey) {
+                        pane.classList.add('is-active');
+                    } else {
+                        pane.classList.remove('is-active');
+                    }
+                });
+            });
+        });
+    }
 
 })();
 

@@ -390,4 +390,34 @@ class BackupPolicyEmailNotificationTest extends TestCase
         ]));
         $pdfResp->assertStatus(200);
     }
+
+    public function test_public_landing_legal_and_docs_render_with_main_ui_header_footer_and_feature_showcase(): void
+    {
+        // 1. Landing Page features & animations showcase
+        $home = $this->get('/');
+        $home->assertStatus(200);
+        $home->assertSee('id="live-intelligence"', false);
+        $home->assertSee('100% Read-Only Malware', false);
+        $home->assertSee('Smart Email Auto-Fallback', false);
+        $home->assertSee('White-Label Client Executive PDF Reports', false);
+        $home->assertSee('class="site-header"', false);
+        $home->assertSee('class="site-footer"', false);
+
+        // 2. Legal Pages (Terms, Privacy, Refund Policy) render inside the Main UI with Header & Footer
+        foreach (['/terms', '/privacy', '/refund-policy'] as $legalUrl) {
+            $resp = $this->get($legalUrl);
+            $resp->assertStatus(200);
+            $resp->assertSee('class="site-header"', false);
+            $resp->assertSee('class="site-footer"', false);
+            $resp->assertSee('href="/#live-intelligence"', false);
+            $resp->assertSee('href="/#pricing"', false);
+        }
+
+        // 3. Docs Page renders inside the Main UI with Header & Footer
+        $docs = $this->get('/docs');
+        $docs->assertStatus(200);
+        $docs->assertSee('class="site-header"', false);
+        $docs->assertSee('class="site-footer"', false);
+        $docs->assertSee('100% Read-Only Malware, Web-Shell &amp; Exposure Scanner', false);
+    }
 }

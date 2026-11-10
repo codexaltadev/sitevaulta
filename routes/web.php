@@ -5,6 +5,7 @@ use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\GoogleDriveOAuthController;
 use App\Http\Controllers\Webhooks\PaymentWebhookController;
 use App\Http\Controllers\WebsiteClientReportController;
+use App\Models\EmailPackage;
 use App\Models\Plan;
 use App\Services\Settings\SystemSettingsService;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
@@ -18,6 +19,16 @@ Route::get('/', function () {
         ->where('is_active', true)
         ->orderBy('sort_order')
         ->get();
+
+    $emailPackages = EmailPackage::query()
+        ->where('is_active', true)
+        ->orderBy('sort_order')
+        ->get();
+
+    $welcomeFreeCredits = (int) SystemSettingsService::get('email_wallet_referral', 'welcome_free_email_credits', 50);
+    $referrerSignupBonus = (int) SystemSettingsService::get('email_wallet_referral', 'referral_signup_bonus_credits', 25);
+    $referrerPurchaseReward = (int) SystemSettingsService::get('email_wallet_referral', 'referral_purchase_reward_credits', 500);
+    $refereePurchaseBonus = (int) SystemSettingsService::get('email_wallet_referral', 'referee_purchase_bonus_credits', 200);
 
     $trialDays = (int) SystemSettingsService::get('trial_billing', 'default_trial_days', 7);
 
@@ -61,6 +72,11 @@ Route::get('/', function () {
         'faviconUrl' => SystemSettingsService::get('general', 'favicon_url', ''),
         'trialDays' => $trialDays,
         'plans' => $plans,
+        'emailPackages' => $emailPackages,
+        'welcomeFreeCredits' => $welcomeFreeCredits,
+        'referrerSignupBonus' => $referrerSignupBonus,
+        'referrerPurchaseReward' => $referrerPurchaseReward,
+        'refereePurchaseBonus' => $refereePurchaseBonus,
     ]);
 })->name('home');
 
