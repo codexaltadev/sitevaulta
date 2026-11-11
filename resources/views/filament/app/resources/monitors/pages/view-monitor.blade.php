@@ -262,7 +262,7 @@
                                         @elseif ($child->last_probe_method === 'dns:inconclusive')
                                             DNS resolver did not answer — retrying
                                         @elseif ($child->type->isExpiryCheck() && $child->expires_at)
-                                            Expires {{ $child->expires_at->setTimezone($timezone)->format('M j, Y') }}{{ $child->last_probe_method === 'manual' ? ' (manual)' : '' }}
+                                            Expires {{ $child->expiryDateLabel() }}{{ $child->last_probe_method === 'manual' ? ' (manual)' : '' }}
                                         @elseif ($child->status === MonitorStatus::Down && $child->last_error)
                                             {{ \Illuminate\Support\Str::limit($child->last_error, 60) }}
                                         @else

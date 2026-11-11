@@ -153,6 +153,24 @@ class MonitorChildChecksTest extends TestCase
         $this->assertSame(10, $children->first()->alert_delay_minutes);
     }
 
+    public function test_edit_form_shows_the_detected_expiry_date_without_freezing_it_as_a_manual_date(): void
+    {
+        $this->subscribeToPlan();
+        $this->travelTo(now()->setTime(12, 0));
+        $parent = Monitor::factory()->create(['workspace_id' => $this->workspace->id, 'url' => 'https://jtest.example.university/']);
+        $parent->children()->create([
+            'workspace_id' => $this->workspace->id, 'type' => MonitorType::Domain, 'name' => 'Domain', 'host' => 'example.university',
+            'expires_at' => now()->addDays(370), 'last_probe_method' => 'rdap', 'last_checked_at' => now()->subMinute(),
+        ]);
+        $parent->children()->create(['workspace_id' => $this->workspace->id, 'type' => MonitorType::Ssl, 'name' => 'SSL', 'host' => 'jtest.example.university']);
+        $this->bootAppPanelForWorkspace();
+
+        Livewire::test(EditMonitor::class, ['record' => $parent->id])
+            ->assertSee(now()->addDays(370)->format('M j, Y').' · 370 days left · read automatically from the registry, checked 1 minute ago')
+            ->assertSee('Not checked yet — the date appears here after the first check.')
+            ->assertFormSet(['extras.domain.manual_expires_at' => null]);
+    }
+
     public function test_extra_checks_count_against_the_monitor_quota(): void
     {
         $this->subscribeToPlan(maxMonitors: 2);

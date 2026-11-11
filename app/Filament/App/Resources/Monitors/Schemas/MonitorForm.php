@@ -352,6 +352,13 @@ class MonitorForm
                     ->required(fn (Get $get): bool => self::selectedType($get)->isExpiryCheck())
                     ->visible(fn (Get $get): bool => self::selectedType($get)->isExpiryCheck()),
 
+                TextEntry::make('detected_expiry')
+                    ->label(fn (?Monitor $record): string => $record?->type === MonitorType::Ssl ? 'Certificate expires' : 'Domain expires')
+                    ->state(fn (?Monitor $record): ?string => self::detectedExpiryText($record))
+                    ->icon(Heroicon::OutlinedCalendarDays)
+                    ->visible(fn (?Monitor $record): bool => (bool) $record?->type->isExpiryCheck())
+                    ->columnSpanFull(),
+
                 DatePicker::make('manual_expires_at')
                     ->label('Expiry date (manual, optional)')
                     ->helperText(fn (Get $get): HtmlString|string => self::manualExpiryHelp($get('host')))
@@ -443,6 +450,12 @@ class MonitorForm
                             ->visible(fn (Get $get): bool => in_array('ssl', (array) $get('extra_checks'), true))
                             ->columns(2)
                             ->schema([
+                                TextEntry::make('extras_ssl_detected')
+                                    ->label('Certificate expires')
+                                    ->state(fn (?Monitor $record): ?string => self::detectedExpiryText(self::childCheck($record, MonitorType::Ssl)))
+                                    ->icon(Heroicon::OutlinedLockClosed)
+                                    ->visible(fn (?Monitor $record): bool => self::childCheck($record, MonitorType::Ssl) !== null)
+                                    ->columnSpanFull(),
                                 TextInput::make('extras.ssl.expiry_threshold_days')
                                     ->label('Alert when it expires within')
                                     ->suffix('days')
@@ -462,6 +475,12 @@ class MonitorForm
                             ->visible(fn (Get $get): bool => in_array('domain', (array) $get('extra_checks'), true))
                             ->columns(2)
                             ->schema([
+                                TextEntry::make('extras_domain_detected')
+                                    ->label('Domain expires')
+                                    ->state(fn (?Monitor $record): ?string => self::detectedExpiryText(self::childCheck($record, MonitorType::Domain)))
+                                    ->icon(Heroicon::OutlinedCalendarDays)
+                                    ->visible(fn (?Monitor $record): bool => self::childCheck($record, MonitorType::Domain) !== null)
+                                    ->columnSpanFull(),
                                 TextInput::make('extras.domain.host')
                                     ->label('Registered domain')
                                     ->placeholder(fn (Get $get): string => MonitorChildChecksSync::suggestedDomainFor(self::extraChecksHost($get)) ?? 'example.com')
@@ -897,13 +916,55 @@ class MonitorForm
     }
 
     /**
+     * What the last check found for an expiry monitor, e.g. "Nov 17, 2027 · 370 days left · read automatically
+     * from the registry, checked 2 minutes ago". Shown read-only in the form: copying it into the manual field
+     * would freeze it and hide a renewal.
+     */
+    public static function detectedExpiryText(?Monitor $monitor): ?string
+    {
+        if ($monitor === null || ! $monitor->type->isExpiryCheck()) {
+            return null;
+        }
+
+        if ($monitor->expires_at === null) {
+            return match (true) {
+                $monitor->last_checked_at === null => 'Not checked yet — the date appears here after the first check.',
+                $monitor->expiryIsUnknown() => 'Not available from the registry — enter the date below.',
+                default => 'Not found in the last check.',
+            };
+        }
+
+        $daysLeft = (int) floor(now()->diffInDays($monitor->expires_at, false));
+        $source = match ($monitor->last_probe_method) {
+            'rdap' => 'read automatically from the registry',
+            'manual' => 'your manual date',
+            'shared' => 'shared from another check of '.RegistrableDomain::of($monitor->host),
+            'cached' => 'last known date',
+            default => $monitor->type === MonitorType::Ssl ? 'read from the certificate' : null,
+        };
+
+        return $monitor->expiryDateLabel()
+            .' · '.($daysLeft >= 0 ? "{$daysLeft} ".str('day')->plural($daysLeft).' left' : 'expired')
+            .($source ? " · {$source}" : '')
+            .($monitor->last_checked_at ? ', checked '.$monitor->last_checked_at->diffForHumans() : '');
+    }
+
+    /**
+     * The extra check of the given type on the record being edited, if any.
+     */
+    private static function childCheck(?Monitor $record, MonitorType $type): ?Monitor
+    {
+        return $record?->children->firstWhere('type', $type);
+    }
+
+    /**
      * The .bd registry publishes no expiry date to machines; BTCL's own lookup (behind a CAPTCHA) shows it
      * to a person, who can then type it in here.
      */
     public static function manualExpiryHelp(?string $host): HtmlString|string
     {
         if (! str_ends_with(mb_strtolower(rtrim((string) $host, '.')), '.bd')) {
-            return 'Only needed if the registry publishes no expiry date (e.g. .bd). A date entered once is shared with other checks of the same domain.';
+            return 'Leave empty when a date is shown above: it is read automatically and follows renewals. Only needed if the registry publishes no expiry date (e.g. .bd).';
         }
 
         return new HtmlString(

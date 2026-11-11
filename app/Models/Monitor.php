@@ -256,6 +256,21 @@ class Monitor extends Model
     }
 
     /**
+     * "Dec 12, 2026". A domain's expiry is a calendar date (registries and manual dates are UTC days), so it is
+     * never shifted by the workspace timezone; a certificate expires at an exact moment, shown in local time.
+     */
+    public function expiryDateLabel(): ?string
+    {
+        if ($this->expires_at === null) {
+            return null;
+        }
+
+        return $this->type === MonitorType::Domain
+            ? $this->expires_at->copy()->utc()->format('M j, Y')
+            : $this->expires_at->copy()->setTimezone($this->workspace?->timezone ?: 'UTC')->format('M j, Y');
+    }
+
+    /**
      * The public site behind this monitor, to open it in a browser: the monitored URL, or https://host for
      * host-based checks. Null for heartbeats and bare IPs. Only http(s) links are ever returned.
      */
