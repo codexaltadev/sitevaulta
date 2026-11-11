@@ -33,12 +33,20 @@ class WebsitesTable
         return $table
             ->modifyQueryUsing(fn ($query) => $query->with('verifiedDomain'))
             ->columns([
-                // On phones only Website, Ownership and Live status show; the domain sits under the name.
+                // Phones get one card-like column (name, domain, ownership, live status) instead of a wide table.
+                TextColumn::make('mobile_card')
+                    ->label('Website')
+                    ->state(fn (Website $record): string => (string) $record->name)
+                    ->formatStateUsing(fn (Website $record): HtmlString => self::mobileCard($record))
+                    ->html()
+                    ->hiddenFrom('md'),
+
                 TextColumn::make('name')
                     ->label('Website')
                     ->description(fn (Website $record): ?string => $record->domain)
                     ->searchable(['name', 'domain'])
-                    ->sortable(),
+                    ->sortable()
+                    ->visibleFrom('md'),
 
                 TextColumn::make('domain')
                     ->label('Domain')
@@ -54,12 +62,7 @@ class WebsitesTable
                     ->label('Ownership Status')
                     ->badge()
                     ->state(fn (Website $record): WebsiteVerificationStatus => $record->verificationStatus())
-                    ->formatStateUsing(fn (WebsiteVerificationStatus $state, Website $record): string => match (true) {
-                        $record->verifiedDomain?->isInGracePeriod() => 'Token missing — backups pause in '.$record->verifiedDomain->graceDaysLeft().' '.str('day')->plural((int) $record->verifiedDomain->graceDaysLeft()),
-                        $record->verifiedDomain?->ownership_lapsed_at !== null && $state !== WebsiteVerificationStatus::Verified => 'Backups paused — token removed',
-                        $state === WebsiteVerificationStatus::Verified => 'Verified Owner',
-                        default => $state->label(),
-                    })
+                    ->formatStateUsing(fn (Website $record): string => self::ownershipBadge($record)[0])
                     ->icon(fn (WebsiteVerificationStatus $state, Website $record): Heroicon => match (true) {
                         (bool) $record->verifiedDomain?->isInGracePeriod() => Heroicon::OutlinedExclamationTriangle,
                         $state === WebsiteVerificationStatus::Verified => Heroicon::OutlinedShieldCheck,
@@ -72,21 +75,15 @@ class WebsitesTable
                         $state === WebsiteVerificationStatus::Failed => collect($record->verifiedDomain?->errorLines() ?? [])->map(fn (string $line): string => "✗ {$line}")->implode("\n"),
                         default => 'Verify ownership to unlock backups and port checks for this domain.',
                     })
-                    ->color(fn (WebsiteVerificationStatus $state, Website $record): string => $record->verifiedDomain?->isInGracePeriod() ? 'warning' : $state->color()),
+                    ->color(fn (Website $record): string => self::ownershipBadge($record)[1])
+                    ->visibleFrom('md'),
 
                 TextColumn::make('uptime_status')
                     ->label('Live Domain & Server Status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state, Website $record): string => match ($state) {
-                        'online' => '🟢 Online'.($record->last_http_status_code ? " ({$record->last_http_status_code} • {$record->last_response_time_ms}ms)" : ''),
-                        'down' => '🔴 Down / Unreachable',
-                        default => '⚪ Not Checked Yet',
-                    })
-                    ->color(fn (?string $state): string => match ($state) {
-                        'online' => 'success',
-                        'down' => 'danger',
-                        default => 'gray',
-                    })
+                    ->formatStateUsing(fn (Website $record): string => self::liveStatusBadge($record)[0])
+                    ->color(fn (Website $record): string => self::liveStatusBadge($record)[1])
+                    ->visibleFrom('md')
                     ->description(fn (Website $record): string => $record->uptime_status === 'down'
                         ? Str::limit((string) ($record->last_down_reason ?: 'Domain or server unreachable'), 65)
                         : ($record->last_uptime_checked_at
@@ -624,5 +621,61 @@ class WebsitesTable
 HTML;
 
         return new HtmlString($html);
+    }
+
+    /**
+     * Ownership badge text and Filament color, from the domain's verified_domains row.
+     *
+     * @return array{string, string}
+     */
+    public static function ownershipBadge(Website $record): array
+    {
+        $status = $record->verificationStatus();
+        $verifiedDomain = $record->verifiedDomain;
+
+        return match (true) {
+            (bool) $verifiedDomain?->isInGracePeriod() => ['Token missing — backups pause in '.$verifiedDomain->graceDaysLeft().' '.str('day')->plural((int) $verifiedDomain->graceDaysLeft()), 'warning'],
+            $verifiedDomain?->ownership_lapsed_at !== null && $status !== WebsiteVerificationStatus::Verified => ['Backups paused — token removed', 'danger'],
+            $status === WebsiteVerificationStatus::Verified => ['Verified Owner', 'success'],
+            default => [$status->label(), $status->color()],
+        };
+    }
+
+    /**
+     * Live status badge text and Filament color, read from the website's uptime monitor.
+     *
+     * @return array{string, string}
+     */
+    public static function liveStatusBadge(Website $record): array
+    {
+        return match ($record->uptime_status) {
+            'online' => ['🟢 Online'.($record->last_http_status_code ? " ({$record->last_http_status_code} • {$record->last_response_time_ms}ms)" : ''), 'success'],
+            'down' => ['🔴 Down / Unreachable', 'danger'],
+            default => ['⚪ Not Checked Yet', 'gray'],
+        };
+    }
+
+    /**
+     * The phone layout: everything that matters about a website in one cell.
+     */
+    public static function mobileCard(Website $record): HtmlString
+    {
+        $tone = fn (string $color): string => match ($color) {
+            'success' => 'var(--sv-success)',
+            'warning' => 'var(--sv-warning)',
+            'danger' => 'var(--sv-danger)',
+            default => 'var(--sv-muted)',
+        };
+        [$ownership, $ownershipColor] = self::ownershipBadge($record);
+        [$live, $liveColor] = self::liveStatusBadge($record);
+        $badge = fn (string $text, string $color): string => '<span style="display:inline-block;font-size:11px;font-weight:600;line-height:1.4;padding:1px 7px;border-radius:999px;border:1px solid '.$tone($color).';color:'.$tone($color).';white-space:nowrap;">'.e($text).'</span>';
+
+        return new HtmlString(
+            '<div style="display:grid;gap:4px;padding:2px 0;white-space:normal;">'
+            .'<strong style="color:var(--sv-text);">'.e($record->name).'</strong>'
+            .'<span style="font-size:12px;color:var(--sv-muted);overflow-wrap:anywhere;">'.e((string) $record->domain).'</span>'
+            .'<span style="display:flex;flex-wrap:wrap;gap:4px;margin-top:2px;">'.$badge($ownership, $ownershipColor).$badge($live, $liveColor).'</span>'
+            .'</div>'
+        );
     }
 }

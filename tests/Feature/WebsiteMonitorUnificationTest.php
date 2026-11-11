@@ -6,6 +6,7 @@ use App\Enums\BillingCycle;
 use App\Enums\MonitorStatus;
 use App\Enums\PaymentGateway;
 use App\Enums\SubscriptionStatus;
+use App\Filament\App\Resources\Websites\Tables\WebsitesTable;
 use App\Models\Monitor;
 use App\Models\Plan;
 use App\Models\Subscription;
@@ -220,6 +221,20 @@ class WebsiteMonitorUnificationTest extends TestCase
             ->assertSee('Verified Owner')
             ->assertSee('Verification Pending')
             ->assertSee('🟢 Online (200 • 321ms)');
+    }
+
+    public function test_phones_get_one_card_with_name_domain_ownership_and_live_status(): void
+    {
+        $website = $this->createWebsite();
+        $website->uptimeMonitor->update(['status' => MonitorStatus::Up, 'last_http_status_code' => 200, 'last_response_time_ms' => 321]);
+        $website->unsetRelation('uptimeMonitor')->load('verifiedDomain');
+
+        $card = (string) WebsitesTable::mobileCard($website);
+
+        $this->assertStringContainsString('Shop', $card);
+        $this->assertStringContainsString('shop.test', $card);
+        $this->assertStringContainsString('Verified Owner', $card);
+        $this->assertStringContainsString('🟢 Online (200 • 321ms)', $card);
     }
 
     public function test_live_check_of_an_unmonitored_website_says_so_instead_of_guessing(): void
