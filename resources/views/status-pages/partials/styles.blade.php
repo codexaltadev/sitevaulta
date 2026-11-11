@@ -36,4 +36,5 @@
     .sp-h2 { font-size: 17px; font-weight: 700; margin: 0 0 14px; }
     .sp-footer { margin-top: 32px; text-align: center; font-size: 13px; color: var(--sp-muted); }
     .sp-footer a { color: inherit; }
+    .sp-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>

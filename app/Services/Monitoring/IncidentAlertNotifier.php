@@ -142,6 +142,13 @@ class IncidentAlertNotifier
             $deliveryStatus = 'failed';
         }
 
+        // Public status page subscribers hear about the outage and the recovery, never the reminders.
+        if ($kind !== 'reminder') {
+            $kind === 'down'
+                ? app(StatusPageNotifier::class)->monitorDown($monitor)
+                : app(StatusPageNotifier::class)->monitorRecovered($monitor, $downFor);
+        }
+
         $incident->forceFill(match ($kind) {
             'down' => ['alerted_at' => $now],
             'reminder' => ['last_reminder_at' => $now, 'reminder_count' => $incident->reminder_count + 1],

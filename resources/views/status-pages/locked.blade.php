@@ -17,7 +17,7 @@
         <div class="sp-card">
             <h1 class="sp-h1" style="font-size:22px;">🔒 {{ $statusPage->name }}</h1>
             <p class="sp-muted" style="margin:8px 0 18px;">This status page is private. Enter the password to view it.</p>
-            <form method="POST" action="{{ route('status-pages.unlock', ['slug' => $statusPage->slug]) }}">
+            <form method="POST" action="{{ $formUrls['unlock'] ?? route('status-pages.unlock', ['slug' => $statusPage->slug]) }}">
                 @csrf
                 <label for="password" class="sp-muted" style="display:block;font-size:13px;margin-bottom:6px;">Password</label>
                 <input id="password" name="password" type="password" class="sp-input" required autofocus autocomplete="current-password">

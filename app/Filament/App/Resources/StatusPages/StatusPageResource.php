@@ -5,6 +5,8 @@ namespace App\Filament\App\Resources\StatusPages;
 use App\Filament\App\Resources\StatusPages\Pages\CreateStatusPage;
 use App\Filament\App\Resources\StatusPages\Pages\EditStatusPage;
 use App\Filament\App\Resources\StatusPages\Pages\ListStatusPages;
+use App\Filament\App\Resources\StatusPages\RelationManagers\AnnouncementsRelationManager;
+use App\Filament\App\Resources\StatusPages\RelationManagers\SubscribersRelationManager;
 use App\Filament\App\Resources\StatusPages\Schemas\StatusPageForm;
 use App\Filament\App\Resources\StatusPages\Tables\StatusPagesTable;
 use App\Models\StatusPage;
@@ -39,6 +41,14 @@ class StatusPageResource extends Resource
     public static function table(Table $table): Table
     {
         return StatusPagesTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            AnnouncementsRelationManager::class,
+            SubscribersRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

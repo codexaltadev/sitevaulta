@@ -9,10 +9,12 @@ use App\Http\Controllers\Webhooks\PaymentWebhookController;
 use App\Http\Controllers\WebsiteClientReportController;
 use App\Models\EmailPackage;
 use App\Models\Plan;
+use App\Models\StatusPage;
 use App\Services\Monitoring\MonitoringIdentity;
 use App\Services\Settings\SystemSettingsService;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
@@ -212,6 +214,28 @@ Route::get('/status/{slug}', [StatusPageController::class, 'show'])
 Route::post('/status/{slug}/unlock', [StatusPageController::class, 'unlock'])
     ->middleware('throttle:10,1')
     ->name('status-pages.unlock');
+
+Route::post('/status/{slug}/subscribe', [StatusPageController::class, 'subscribe'])
+    ->middleware('throttle:5,1')
+    ->name('status-pages.subscribe');
+
+Route::get('/status/subscription/{token}/confirm', [StatusPageController::class, 'confirmSubscription'])
+    ->where('token', '[A-Za-z0-9]{48}')
+    ->middleware('throttle:20,1')
+    ->name('status-pages.subscription.confirm');
+
+Route::get('/status/unsubscribe/{token}', [StatusPageController::class, 'unsubscribe'])
+    ->where('token', '[A-Za-z0-9]{48}')
+    ->middleware('throttle:20,1')
+    ->name('status-pages.unsubscribe');
+
+// For on-demand TLS (e.g. Caddy "ask"): 200 only for the custom domain of a published status page.
+Route::get('/status-domain-check', fn (Request $request) => StatusPage::query()
+    ->where('custom_domain', StatusPage::normalizeDomain((string) $request->query('domain')))
+    ->where('is_published', true)
+    ->exists() ? response('ok') : response('unknown domain', 404))
+    ->middleware('throttle:60,1')
+    ->name('status-pages.domain-check');
 
 Route::get('/auth/google/redirect', [GoogleDriveOAuthController::class, 'redirect'])
     ->name('google.oauth.redirect');

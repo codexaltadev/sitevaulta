@@ -3,12 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Enums\MonitorStatus;
+use App\Http\Requests\SubscribeStatusPageRequest;
 use App\Http\Requests\UnlockStatusPageRequest;
 use App\Models\MaintenanceWindow;
 use App\Models\Monitor;
 use App\Models\MonitorIncident;
 use App\Models\StatusPage;
+use App\Models\StatusPageSubscriber;
 use App\Services\Monitoring\MonitorUptimeStatistics;
+use App\Services\Monitoring\StatusPageNotifier;
 use Carbon\CarbonInterface;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,10 +31,72 @@ class StatusPageController extends Controller
 
     public function show(Request $request, string $slug, MonitorUptimeStatistics $statistics): View
     {
+        return $this->render($request, $this->findPublishedPage($slug), $statistics);
+    }
+
+    /**
+     * Serves a page on its own custom domain (status.client.com): "/" shows it, "/unlock" and "/subscribe"
+     * take the forms. Called by ServeStatusPageOnCustomDomain before normal routing.
+     */
+    public function showOnCustomDomain(Request $request, StatusPage $statusPage): mixed
+    {
+        return match (true) {
+            $request->isMethod('GET') && $request->path() === '/' => $this->render($request, $statusPage, app(MonitorUptimeStatistics::class)),
+            $request->isMethod('POST') && $request->path() === 'unlock' => $this->unlock(app(UnlockStatusPageRequest::class), $statusPage->slug),
+            $request->isMethod('POST') && $request->path() === 'subscribe' => $this->subscribe(app(SubscribeStatusPageRequest::class), $statusPage->slug, app(StatusPageNotifier::class)),
+            default => abort(404),
+        };
+    }
+
+    public function subscribe(SubscribeStatusPageRequest $request, string $slug, StatusPageNotifier $notifier): RedirectResponse
+    {
         $statusPage = $this->findPublishedPage($slug);
 
+        abort_unless($statusPage->allow_subscriptions, 404);
+
         if ($statusPage->isPasswordProtected() && ! $request->session()->get($statusPage->unlockSessionKey())) {
-            return view('status-pages.locked', ['statusPage' => $statusPage]);
+            abort(403);
+        }
+
+        $subscriber = $statusPage->subscribers()->firstOrCreate(['email' => mb_strtolower(trim($request->validated('email')))]);
+
+        // Always the same answer, so the form cannot be used to find out who is subscribed.
+        if ($subscriber->confirmed_at === null) {
+            $notifier->sendConfirmation($subscriber);
+        }
+
+        return back()->with('status_page_message', 'Check your inbox: we sent a link to confirm your subscription.');
+    }
+
+    public function confirmSubscription(string $token): RedirectResponse
+    {
+        $subscriber = StatusPageSubscriber::query()->with('statusPage')->where('token', $token)->firstOrFail();
+        $subscriber->confirmed_at ??= now();
+        $subscriber->save();
+
+        return redirect()->to($subscriber->statusPage->publicUrl())
+            ->with('status_page_message', 'You are subscribed. We will email you when something changes.');
+    }
+
+    public function unsubscribe(string $token): RedirectResponse
+    {
+        $subscriber = StatusPageSubscriber::query()->with('statusPage')->where('token', $token)->firstOrFail();
+        $pageUrl = $subscriber->statusPage->publicUrl();
+        $subscriber->delete();
+
+        return redirect()->to($pageUrl)->with('status_page_message', 'You are unsubscribed. You will not get any more emails.');
+    }
+
+    private function render(Request $request, StatusPage $statusPage, MonitorUptimeStatistics $statistics): View
+    {
+        $onCustomDomain = filled($statusPage->custom_domain) && $request->getHost() === $statusPage->custom_domain;
+        $formUrls = [
+            'unlock' => $onCustomDomain ? url('/unlock') : route('status-pages.unlock', ['slug' => $statusPage->slug]),
+            'subscribe' => $onCustomDomain ? url('/subscribe') : route('status-pages.subscribe', ['slug' => $statusPage->slug]),
+        ];
+
+        if ($statusPage->isPasswordProtected() && ! $request->session()->get($statusPage->unlockSessionKey())) {
+            return view('status-pages.locked', ['statusPage' => $statusPage, 'formUrls' => $formUrls]);
         }
 
         $monitors = $statusPage->monitors()
@@ -50,6 +115,9 @@ class StatusPageController extends Controller
             'incidents' => $statusPage->show_incident_history ? $this->recentIncidents($monitors) : collect(),
             'maintenance' => $this->maintenanceSchedule($monitors),
             'timezone' => $timezone,
+            'formUrls' => $formUrls,
+            'announcements' => $statusPage->announcements()->open()->get(),
+            'pastAnnouncements' => $statusPage->announcements()->whereNotNull('resolved_at')->where('resolved_at', '>=', now()->subDays(self::INCIDENT_HISTORY_DAYS))->get(),
         ]);
     }
 
@@ -63,7 +131,8 @@ class StatusPageController extends Controller
 
         $request->session()->put($statusPage->unlockSessionKey(), true);
 
-        return redirect()->route('status-pages.show', ['slug' => $statusPage->slug]);
+        // On a custom domain the visitor goes back to "/" there; otherwise to /status/{slug}.
+        return redirect()->to($request->getHost() === $statusPage->custom_domain ? url('/') : route('status-pages.show', ['slug' => $statusPage->slug]));
     }
 
     private function findPublishedPage(string $slug): StatusPage

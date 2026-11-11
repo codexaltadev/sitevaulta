@@ -48,10 +48,26 @@
             @endif
         </header>
 
+        @if (session('status_page_message'))
+            <div class="sp-card" role="status" style="margin-bottom:14px;border-left:4px solid var(--sp-up);font-size:14px;">{{ session('status_page_message') }}</div>
+        @endif
+
         <div class="sp-banner" style="background:{{ $banner[1] }};" role="status">
             <span class="sp-banner-icon" aria-hidden="true">{{ $banner[2] }}</span>
             <span>{{ $banner[0] }}</span>
         </div>
+
+        @foreach ($announcements as $announcement)
+            <section class="sp-card" style="margin-top:18px;border-left:4px solid {{ ['incident' => 'var(--sp-down)', 'maintenance' => 'var(--sp-maintenance)'][$announcement->type] ?? 'var(--sp-up)' }};">
+                <div class="sp-muted" style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">
+                    {{ $announcement->typeLabel() }} · {{ $announcement->updated_at->setTimezone($timezone)->format('M j, H:i T') }}
+                </div>
+                <h2 class="sp-h2" style="margin:4px 0 0;">{{ $announcement->title }}</h2>
+                @if ($announcement->body)
+                    <p style="margin:8px 0 0;white-space:pre-line;">{{ $announcement->body }}</p>
+                @endif
+            </section>
+        @endforeach
 
         @if ($maintenance->isNotEmpty())
             <section class="sp-card" style="margin-top:18px;border-left:4px solid var(--sp-maintenance);">
@@ -128,8 +144,36 @@
                         </div>
                     </div>
                 @empty
-                    <p class="sp-muted" style="margin:0;">No incidents reported. 🎉</p>
+                    @if ($pastAnnouncements->isEmpty())
+                        <p class="sp-muted" style="margin:0;">No incidents reported. 🎉</p>
+                    @endif
                 @endforelse
+                @foreach ($pastAnnouncements as $announcement)
+                    <div class="sp-list-item">
+                        <div>
+                            <strong>{{ $announcement->title }}</strong>
+                            <span class="sp-muted" style="font-size:13px;margin-left:6px;">{{ $announcement->typeLabel() }} · resolved</span>
+                        </div>
+                        <div class="sp-muted" style="font-size:13px;white-space:nowrap;">{{ $announcement->resolved_at->setTimezone($timezone)->format('M j, H:i T') }}</div>
+                    </div>
+                @endforeach
+            </section>
+        @endif
+
+        @if ($statusPage->allow_subscriptions)
+            <section class="sp-card" style="margin-top:18px;">
+                <h2 class="sp-h2">Get updates by email</h2>
+                <p class="sp-muted" style="margin:0 0 12px;font-size:14px;">We email you when a service goes down, comes back, or we post an update. Unsubscribe any time.</p>
+                <form method="POST" action="{{ $formUrls['subscribe'] }}" style="display:flex;flex-wrap:wrap;gap:8px;">
+                    @csrf
+                    <label for="sp-subscribe-email" class="sp-sr-only">Email address</label>
+                    <input id="sp-subscribe-email" type="email" name="email" required maxlength="191" placeholder="you@example.com" autocomplete="email"
+                           style="flex:1 1 220px;padding:10px 12px;border:1px solid var(--sp-border);border-radius:8px;font-size:14px;background:var(--sp-bg);color:var(--sp-text);">
+                    <button type="submit" style="padding:10px 16px;border:0;border-radius:8px;background:var(--sp-up);color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Subscribe</button>
+                </form>
+                @error('email')
+                    <p style="margin:8px 0 0;color:var(--sp-down);font-size:13px;">{{ $message }}</p>
+                @enderror
             </section>
         @endif
 
