@@ -598,7 +598,11 @@ class MonitorForm
             ->values()
             ->all();
 
-        return json_encode($labels, JSON_UNESCAPED_UNICODE).'[Math.round($value)]';
+        // Single-quoted JS strings: this code is placed inside a double-quoted HTML attribute (x-data="…"),
+        // so a double quote from json_encode() would end the attribute and break the whole slider.
+        $array = '['.implode(',', array_map(fn (string $label): string => "'".addcslashes($label, "'\\")."'", $labels)).']';
+
+        return $array.'[Math.round($value)]';
     }
 
     private static function alertsSection(): Section

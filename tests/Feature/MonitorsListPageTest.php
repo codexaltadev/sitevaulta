@@ -234,7 +234,10 @@ class MonitorsListPageTest extends TestCase
             ->assertOk()
             ->assertSeeInOrder(['Monitor type', 'Extra checks for this target', 'Monitor interval', 'Notifications and alerts', 'Advanced settings', 'Summary'])
             ->assertSee('🔒 1m')
-            ->assertSee('2 of 10 monitors (including this one, plus 1 per extra check)');
+            ->assertSee('2 of 10 monitors (including this one, plus 1 per extra check)')
+            // The slider's label code sits inside x-data="…": a double-quoted string there broke the slider.
+            ->assertSee("['1m','2m','5m','10m','30m','1h','6h','24h'][Math.round(\$value)]", false)
+            ->assertDontSee('["1m","2m"', false);
 
         $this->get("/app/{$this->workspace->slug}/monitors/{$monitor->id}/edit")
             ->assertOk()
