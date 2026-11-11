@@ -6,7 +6,6 @@ use App\Enums\BillingCycle;
 use App\Enums\MonitorStatus;
 use App\Enums\PaymentGateway;
 use App\Enums\SubscriptionStatus;
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\Monitor;
 use App\Models\Plan;
 use App\Models\Subscription;
@@ -64,16 +63,17 @@ class WebsiteMonitorUnificationTest extends TestCase
     /**
      * @param  array<string, mixed>  $attributes
      */
-    private function createWebsite(array $attributes = []): Website
+    private function createWebsite(array $attributes = [], bool $verified = true): Website
     {
-        return Website::create([
+        $website = Website::create([
             'workspace_id' => $this->workspace->id,
             'name' => 'Shop',
             'url' => 'https://shop.test',
-            'verification_status' => WebsiteVerificationStatus::Verified,
             'status' => 'active',
             ...$attributes,
         ]);
+
+        return $verified ? $this->verifyWebsiteOwnership($website) : $website;
     }
 
     public function test_new_website_gets_a_linked_http_monitor(): void
@@ -90,11 +90,11 @@ class WebsiteMonitorUnificationTest extends TestCase
     public function test_verifying_ownership_creates_the_monitor_that_was_skipped_earlier(): void
     {
         $this->subscribeToPlan(maxMonitors: 0);
-        $website = $this->createWebsite(['url' => 'https://pending.test', 'verification_status' => WebsiteVerificationStatus::Pending]);
+        $website = $this->createWebsite(['url' => 'https://pending.test'], verified: false);
         $this->assertSame(0, $website->monitors()->count());
 
         $this->subscribeToPlan(maxMonitors: 10);
-        $website->fresh()->update(['verification_status' => WebsiteVerificationStatus::Verified]);
+        $this->verifyWebsiteOwnership($website->fresh());
 
         $monitor = $website->monitors()->sole();
         $this->assertSame('https://pending.test', $monitor->url);
@@ -103,10 +103,10 @@ class WebsiteMonitorUnificationTest extends TestCase
     public function test_failed_verification_does_not_create_a_monitor(): void
     {
         $this->subscribeToPlan(maxMonitors: 0);
-        $website = $this->createWebsite(['url' => 'https://pending.test', 'verification_status' => WebsiteVerificationStatus::Pending]);
+        $website = $this->createWebsite(['url' => 'https://pending.test'], verified: false);
 
         $this->subscribeToPlan(maxMonitors: 10);
-        $website->fresh()->update(['verification_status' => WebsiteVerificationStatus::Failed]);
+        $website->verifiedDomain()->update(['last_error' => 'DNS TXT record: not found yet.']);
 
         $this->assertSame(0, $website->monitors()->count());
     }

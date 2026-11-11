@@ -6,41 +6,33 @@ use App\Models\VerifiedDomain;
 use App\Models\Website;
 
 /**
- * Mirrors a backup website's ownership verification into verified_domains, so the Verified domains
- * page lists every proven domain and monitoring needs no second verification for it.
+ * Links each backup website to the verified_domains row of its domain — the single place where ownership
+ * (token, method, verified_at) lives. Nothing is copied: the website reads its status through the link.
  */
 class VerifiedDomainSync
 {
-    public function syncWebsite(Website $website): void
+    /**
+     * Ensures the website's domain has a row (pending until proven) and is the only row linked to it.
+     */
+    public function linkWebsite(Website $website): ?VerifiedDomain
     {
         $domain = filled($website->domain) ? VerifiedDomain::normalize((string) $website->domain) : '';
-        $keep = $website->isVerified() && $domain !== '';
 
-        // Rows this website created earlier for another domain, or while it was still verified.
+        // Rows linked for an old domain: an unproven challenge is dropped, real proof stays as a plain domain.
         VerifiedDomain::query()
             ->where('website_id', $website->id)
-            ->when($keep, fn ($query) => $query->where('domain', '!=', $domain))
+            ->when($domain !== '', fn ($query) => $query->where('domain', '!=', $domain))
             ->get()
-            ->each(fn (VerifiedDomain $verifiedDomain) => $verifiedDomain->verification_method === VerifiedDomain::METHOD_BACKUP_WEBSITE
-                ? $verifiedDomain->delete()
-                : $verifiedDomain->update(['website_id' => null]));
+            ->each(fn (VerifiedDomain $old) => $old->isVerified() ? $old->update(['website_id' => null]) : $old->delete());
 
-        if (! $keep) {
-            return;
+        if ($domain === '') {
+            return null;
         }
 
         $verifiedDomain = VerifiedDomain::query()->firstOrNew(['workspace_id' => $website->workspace_id, 'domain' => $domain]);
-
-        // A domain already proven by DNS TXT / file keeps that proof; it is just linked to the website.
-        if (! $verifiedDomain->isVerified()) {
-            $verifiedDomain->fill([
-                'verification_method' => VerifiedDomain::METHOD_BACKUP_WEBSITE,
-                'verified_at' => $website->verified_at ?? now(),
-                'last_error' => null,
-            ]);
-        }
-
         $verifiedDomain->website_id = $website->id;
         $verifiedDomain->save();
+
+        return $verifiedDomain;
     }
 }

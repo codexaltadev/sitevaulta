@@ -4,7 +4,6 @@ namespace App\Filament\Admin\Widgets;
 
 use App\Enums\BackupRunStatus;
 use App\Enums\PaymentStatus;
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\BackupRun;
 use App\Models\Payment;
 use App\Models\Website;
@@ -19,7 +18,7 @@ class AdminExecutiveStatsWidget extends BaseWidget
     protected function getStats(): array
     {
         $totalWorkspaces = Workspace::count();
-        $verifiedWebsites = Website::where('verification_status', WebsiteVerificationStatus::Verified)->count();
+        $verifiedWebsites = Website::query()->ownershipVerified()->count();
         $bdtRevenue = (float) Payment::where('status', PaymentStatus::Succeeded)->where('currency', 'BDT')->sum('amount');
         $usdRevenue = (float) Payment::where('status', PaymentStatus::Succeeded)->where('currency', 'USD')->sum('amount');
         $completedRuns = BackupRun::where('status', BackupRunStatus::Completed)->count();

@@ -3,7 +3,6 @@
 namespace App\Services\Monitoring;
 
 use App\Enums\MonitorStatus;
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\Monitor;
 use App\Models\Website;
 use App\Services\Billing\EntitlementService;
@@ -61,24 +60,18 @@ class WebsiteMonitorSync
      */
     public function syncFromWebsite(Website $website): void
     {
-        if (! $website->wasChanged(['url', 'domain', 'uptime_monitoring_enabled', 'verification_status'])) {
+        if (! $website->wasChanged(['url', 'domain', 'uptime_monitoring_enabled'])) {
             return;
         }
 
         $monitor = $website->monitors()->first();
 
+        // (A monitor skipped earlier is also created when the domain becomes verified — see VerifiedDomain.)
         if ($monitor === null) {
-            $justVerified = $website->wasChanged('verification_status')
-                && $website->verification_status === WebsiteVerificationStatus::Verified;
-
-            if ($website->uptime_monitoring_enabled && ($justVerified || $website->wasChanged('uptime_monitoring_enabled'))) {
+            if ($website->wasChanged('uptime_monitoring_enabled') && $website->uptime_monitoring_enabled) {
                 $this->ensureMonitorFor($website);
             }
 
-            return;
-        }
-
-        if (! $website->wasChanged(['url', 'domain', 'uptime_monitoring_enabled'])) {
             return;
         }
 

@@ -696,7 +696,7 @@ class WebsiteUptimeMonitorService
 
         // 4. Calculate Overall Website Protection Score (0 - 100)
         $score = 0;
-        if (($website->verification_status?->value ?? $website->verification_status) === 'verified') {
+        if ($website->isVerified()) {
             $score += 20;
         }
         if ($website->uptime_status === 'online') {

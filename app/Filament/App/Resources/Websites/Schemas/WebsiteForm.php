@@ -2,6 +2,7 @@
 
 namespace App\Filament\App\Resources\Websites\Schemas;
 
+use App\Models\VerifiedDomain;
 use App\Models\Website;
 use App\Models\Workspace;
 use App\Rules\UniqueWorkspaceTarget;
@@ -190,15 +191,15 @@ class WebsiteForm
                                             .'</div>',
                                             $boxStyle,
                                             $codeStyle,
-                                            e($challenge->dns_host),
+                                            e($challenge->dnsRecordName()),
                                             e($challenge->token),
                                             $codeStyle,
                                             e(rtrim($record->url, '/')),
-                                            e($challenge->file_path),
+                                            e(VerifiedDomain::FILE_PATH),
                                             e(rtrim($record->url, '/')),
                                             e($challenge->token),
                                             $codeStyle,
-                                            e($challenge->meta_tag_name),
+                                            e(VerifiedDomain::META_TAG_NAME),
                                             e($challenge->token)
                                         ));
                                     }),

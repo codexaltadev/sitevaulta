@@ -83,7 +83,7 @@ class HostOwnershipTest extends TestCase
     public function test_verified_website_owns_only_its_exact_host_and_ip(): void
     {
         $this->fakeDns();
-        Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://www.acme.example', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
+        $this->verifyWebsiteOwnership(Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://www.acme.example', 'uptime_monitoring_enabled' => false]));
         $verifier = app(HostOwnershipVerifier::class);
 
         $this->assertTrue($verifier->ownership($this->workspace, 'acme.example')['owned']);
@@ -98,9 +98,11 @@ class HostOwnershipTest extends TestCase
     {
         $this->fakeDns();
         Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'uptime_monitoring_enabled' => false]);
-        VerifiedDomain::create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example']);
+        VerifiedDomain::create(['workspace_id' => $this->workspace->id, 'domain' => 'shop.example']);
 
+        $this->assertSame(2, VerifiedDomain::whereNull('verified_at')->count(), 'The website got a pending row of its own.');
         $this->assertFalse(app(HostOwnershipVerifier::class)->ownership($this->workspace, 'acme.example')['owned']);
+        $this->assertFalse(app(HostOwnershipVerifier::class)->ownership($this->workspace, 'shop.example')['owned']);
     }
 
     public function test_only_a_server_that_authenticated_counts_as_proof(): void
@@ -212,7 +214,7 @@ class HostOwnershipTest extends TestCase
 
     public function test_backup_website_domains_are_not_reverified_here(): void
     {
-        Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
+        $this->verifyWebsiteOwnership(Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'uptime_monitoring_enabled' => false]));
         VerifiedDomain::query()->update(['last_attempted_at' => now()->subDays(30)]);
 
         $this->artisan('sitevaulta:reverify-domains')->expectsOutput('Re-verified 0 | warnings 0 | revoked 0');
@@ -262,7 +264,7 @@ class HostOwnershipTest extends TestCase
 
         $this->assertTrue($result->verified, $result->message);
         $this->assertTrue($website->refresh()->isVerified());
-        $this->assertSame(VerifiedDomain::METHOD_BACKUP_WEBSITE, VerifiedDomain::where('domain', 'acme.example')->sole()->verification_method);
+        $this->assertSame('meta_tag', VerifiedDomain::where('domain', 'acme.example')->sole()->verification_method);
     }
 
     public function test_port_type_is_locked_until_the_workspace_owns_a_host_and_a_forged_choice_is_still_rejected(): void
@@ -437,48 +439,51 @@ class HostOwnershipTest extends TestCase
             ->assertSee('Pending');
     }
 
-    public function test_verified_domains_page_lists_websites_already_verified_in_backup_management(): void
+    public function test_verified_domains_page_lists_every_backup_website_domain_with_its_status(): void
     {
-        Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
+        $this->verifyWebsiteOwnership(Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'uptime_monitoring_enabled' => false]));
         Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Draft', 'url' => 'https://draft.example', 'uptime_monitoring_enabled' => false]);
 
         $this->actingAs($this->user)
             ->get("/app/{$this->workspace->slug}/verified-domains")
             ->assertOk()
-            ->assertSeeInOrder(['acme.example', 'Verified', 'via backup website verification', 'Backup website', 'Acme'])
-            ->assertDontSee('draft.example');
+            ->assertSeeInOrder(['draft.example', 'Pending', 'Backup website', 'Draft'])
+            ->assertSeeInOrder(['acme.example', 'Verified', 'via DNS TXT record', 'Backup website', 'Acme']);
     }
 
-    public function test_website_verification_is_mirrored_into_verified_domains(): void
+    public function test_a_website_reads_its_ownership_from_its_domain_row(): void
     {
-        $website = Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://www.acme.example', 'verification_status' => WebsiteVerificationStatus::Pending, 'uptime_monitoring_enabled' => false]);
-        $this->assertSame(0, VerifiedDomain::count());
+        $website = Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://www.acme.example', 'uptime_monitoring_enabled' => false]);
 
-        $website->update(['verification_status' => WebsiteVerificationStatus::Verified]);
-        $mirrored = VerifiedDomain::sole();
-        $this->assertSame(['acme.example', $website->id, VerifiedDomain::METHOD_BACKUP_WEBSITE], [$mirrored->domain, $mirrored->website_id, $mirrored->verification_method]);
-        $this->assertTrue($mirrored->isVerified());
+        $row = VerifiedDomain::sole();
+        $this->assertSame(['acme.example', $website->id], [$row->domain, $row->website_id]);
+        $this->assertSame(WebsiteVerificationStatus::Pending, $website->verificationStatus());
 
+        $row->update(['last_error' => 'DNS TXT record: not found yet.']);
+        $this->assertSame(WebsiteVerificationStatus::Failed, $website->fresh()->verificationStatus());
+
+        $row->update(['verified_at' => now(), 'verification_method' => 'meta_tag', 'last_error' => null]);
+        $this->assertTrue($website->fresh()->isVerified());
+        $this->assertSame(1, Website::query()->ownershipVerified()->count());
+
+        // A new domain starts unproven; the old proof stays as a plain verified domain.
         $website->update(['url' => 'https://shop.acme.example']);
-        $this->assertSame(['shop.acme.example'], VerifiedDomain::pluck('domain')->all());
+        $this->assertFalse($website->fresh()->isVerified());
+        $this->assertNull($row->fresh()->website_id);
+        $this->assertTrue($row->fresh()->isVerified());
 
-        $website->update(['verification_status' => WebsiteVerificationStatus::Failed]);
-        $this->assertSame(0, VerifiedDomain::count());
+        $website->delete();
+        $this->assertSame(['acme.example'], VerifiedDomain::pluck('domain')->all());
     }
 
-    public function test_a_domain_proven_by_dns_keeps_its_proof_when_the_website_links_and_unlinks(): void
+    public function test_a_website_on_a_domain_already_proven_by_dns_is_verified_immediately(): void
     {
         $proven = VerifiedDomain::factory()->verified()->create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example']);
-        $pending = VerifiedDomain::factory()->create(['workspace_id' => $this->workspace->id, 'domain' => 'shop.example']);
 
-        $website = Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
-        Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Shop', 'url' => 'https://shop.example', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
+        $website = Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'uptime_monitoring_enabled' => false]);
 
+        $this->assertTrue($website->isVerified());
         $this->assertSame(['dns_txt', $website->id], [$proven->fresh()->verification_method, $proven->fresh()->website_id]);
-        $this->assertTrue($pending->fresh()->isFromBackupWebsite(), 'A pending manual row is completed by the website verification.');
-
-        $website->update(['verification_status' => WebsiteVerificationStatus::Unverified]);
-        $this->assertTrue($proven->fresh()->isVerified());
-        $this->assertNull($proven->fresh()->website_id);
+        $this->assertSame(1, VerifiedDomain::count());
     }
 }

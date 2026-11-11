@@ -20,10 +20,10 @@ class ReverifyDomainsCommand extends Command
     {
         $counts = ['verified' => 0, 'warning' => 0, 'revoked' => 0];
 
-        // Backup-website rows follow the website's own verification, so only domains proven here are re-checked.
+        // A backup website's domain is not revoked automatically: that would silently stop its backups.
         VerifiedDomain::query()
             ->whereNotNull('verified_at')
-            ->where(fn (Builder $query) => $query->whereNull('verification_method')->orWhere('verification_method', '!=', VerifiedDomain::METHOD_BACKUP_WEBSITE))
+            ->whereNull('website_id')
             ->where(fn (Builder $query) => $query->whereNull('last_attempted_at')->orWhere('last_attempted_at', '<=', now()->subDays(VerifiedDomain::REVERIFY_AFTER_DAYS)))
             ->with('workspace')
             ->lazyById(100)

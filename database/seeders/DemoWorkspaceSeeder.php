@@ -14,8 +14,6 @@ use App\Enums\MonitorStatus;
 use App\Enums\MonitorType;
 use App\Enums\ScheduleFrequency;
 use App\Enums\StorageDriver;
-use App\Enums\VerificationMethod;
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\BackupArtifact;
 use App\Models\BackupChain;
 use App\Models\BackupPolicy;
@@ -29,6 +27,7 @@ use App\Models\StorageConnection;
 use App\Models\Website;
 use App\Models\Workspace;
 use App\Services\Monitoring\MonitorCheckRunner;
+use App\Services\Verification\DomainVerificationService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -128,9 +127,6 @@ class DemoWorkspaceSeeder extends Seeder
                 'name' => 'FashionBD Online Store (WooCommerce)',
                 'url' => 'https://shop-fashionbd.com',
                 'environment' => 'production',
-                'verification_status' => WebsiteVerificationStatus::Verified,
-                'verification_method' => VerificationMethod::DnsTxt,
-                'verified_at' => now()->subDays(28),
                 'webhook_secret' => 'sv_wh_live_'.Str::random(24),
                 'known_files_size_bytes' => 420 * 1024 * 1024, // 420 MB
                 'known_db_size_bytes' => 75 * 1024 * 1024,   // 75 MB
@@ -171,9 +167,6 @@ class DemoWorkspaceSeeder extends Seeder
                 'name' => 'TravelMatrix Global API (Laravel)',
                 'url' => 'https://api.travelmatrix.io',
                 'environment' => 'production',
-                'verification_status' => WebsiteVerificationStatus::Verified,
-                'verification_method' => VerificationMethod::HtmlFile,
-                'verified_at' => now()->subDays(14),
                 'webhook_secret' => 'sv_wh_live_'.Str::random(24),
                 'known_files_size_bytes' => 180 * 1024 * 1024, // 180 MB
                 'known_db_size_bytes' => 160 * 1024 * 1024,  // 160 MB
@@ -214,15 +207,17 @@ class DemoWorkspaceSeeder extends Seeder
                 'name' => 'Fintech Enterprise CRM (Node.js)',
                 'url' => 'https://crm.fintechcloud.net',
                 'environment' => 'production',
-                'verification_status' => WebsiteVerificationStatus::Verified,
-                'verification_method' => VerificationMethod::MetaTag,
-                'verified_at' => now()->subDays(7),
                 'webhook_secret' => 'sv_wh_live_'.Str::random(24),
                 'known_files_size_bytes' => 650 * 1024 * 1024, // 650 MB
                 'known_db_size_bytes' => 110 * 1024 * 1024,  // 110 MB
                 'status' => 'active',
             ]
         );
+
+        // Ownership lives on each website's verified_domains row.
+        foreach ([[$site1, 'dns_txt', 28], [$site2, 'html_file', 14], [$site3, 'meta_tag', 7]] as [$site, $method, $daysAgo]) {
+            DomainVerificationService::ensureChallengeExists($site)->update(['verification_method' => $method, 'verified_at' => now()->subDays($daysAgo)]);
+        }
 
         ServerConnection::updateOrCreate(
             ['workspace_id' => $workspace->id, 'website_id' => $site3->id],

@@ -8,8 +8,6 @@ use App\Enums\DatabaseDriver;
 use App\Enums\FileProtocol;
 use App\Enums\ScheduleFrequency;
 use App\Enums\StorageDriver;
-use App\Enums\VerificationMethod;
-use App\Enums\WebsiteVerificationStatus;
 use App\Enums\WorkspaceRole;
 use App\Models\BackupTemplate;
 use App\Models\EmailTemplate;
@@ -23,6 +21,7 @@ use App\Services\Billing\EmailWalletService;
 use App\Services\Billing\EntitlementService;
 use App\Services\Settings\SystemSettingsService;
 use App\Services\Settings\WorkspaceSettingsService;
+use App\Services\Verification\DomainVerificationService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Permission;
@@ -448,14 +447,13 @@ class DatabaseSeeder extends Seeder
                 'name' => 'Acme Commerce Production',
                 'url' => 'https://acme-commerce.example.com',
                 'environment' => 'production',
-                'verification_status' => WebsiteVerificationStatus::Verified,
-                'verification_method' => VerificationMethod::DnsTxt,
-                'verified_at' => now(),
                 'known_files_size_bytes' => 450 * 1024 * 1024,
                 'known_db_size_bytes' => 85 * 1024 * 1024,
                 'status' => 'active',
             ]
         );
+
+        DomainVerificationService::ensureChallengeExists($demoWebsite)->update(['verification_method' => 'dns_txt', 'verified_at' => now()]);
 
         ServerConnection::firstOrCreate(
             ['workspace_id' => $demoWorkspace->id, 'website_id' => $demoWebsite->id],

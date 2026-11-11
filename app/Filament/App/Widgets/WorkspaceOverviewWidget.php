@@ -4,7 +4,6 @@ namespace App\Filament\App\Widgets;
 
 use App\Enums\BackupRunStatus;
 use App\Enums\SubscriptionStatus;
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\Workspace;
 use Filament\Facades\Filament;
 use Filament\Widgets\StatsOverviewWidget as BaseWidget;
@@ -23,7 +22,7 @@ class WorkspaceOverviewWidget extends BaseWidget
         }
 
         $totalWebsites = $workspace->websites()->count();
-        $verifiedWebsites = $workspace->websites()->where('verification_status', WebsiteVerificationStatus::Verified)->count();
+        $verifiedWebsites = $workspace->websites()->ownershipVerified()->count();
         $activePolicies = $workspace->backupPolicies()->where('status', 'active')->count();
         $completedRuns = $workspace->backupRuns()->where('status', BackupRunStatus::Completed)->count();
         $sub = $workspace->currentSubscription()->with('plan')->first();

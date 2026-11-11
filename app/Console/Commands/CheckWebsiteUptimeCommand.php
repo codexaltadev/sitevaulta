@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\Website;
 use App\Services\Verification\WebsiteUptimeMonitorService;
 use Illuminate\Console\Command;
@@ -17,7 +16,7 @@ class CheckWebsiteUptimeCommand extends Command
     {
         $websites = Website::with(['workspace.owner', 'serverConnections'])
             ->withExists('monitors')
-            ->where('verification_status', WebsiteVerificationStatus::Verified)
+            ->ownershipVerified()
             ->where('status', 'active')
             ->where('uptime_monitoring_enabled', true)
             ->get();

@@ -60,7 +60,7 @@ class VerifiedDomainsTable
                     ->label('How to verify')
                     ->icon(Heroicon::OutlinedInformationCircle)
                     ->color('gray')
-                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite())
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite() && $record->isVerified())
                     ->modalHeading(fn (VerifiedDomain $record): string => "Verify {$record->domain}")
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close')
@@ -90,7 +90,7 @@ class VerifiedDomainsTable
                     ->label('Verify now')
                     ->icon(Heroicon::OutlinedShieldCheck)
                     ->color('success')
-                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite())
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite() && $record->isVerified())
                     ->action(function (VerifiedDomain $record): void {
                         $verified = app(HostOwnershipVerifier::class)->verify($record);
 
@@ -107,7 +107,7 @@ class VerifiedDomainsTable
                             : $notification->danger()->body($record->errorListHtml());
                         $notification->send();
                     }),
-                // Managed from Backup Management: it disappears when the website loses verification or is deleted.
+                // A backup website owns its domain row; it goes away with the website.
                 DeleteAction::make()
                     ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite()),
             ]);

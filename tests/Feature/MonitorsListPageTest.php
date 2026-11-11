@@ -6,7 +6,6 @@ use App\Enums\BillingCycle;
 use App\Enums\MonitorStatus;
 use App\Enums\PaymentGateway;
 use App\Enums\SubscriptionStatus;
-use App\Enums\WebsiteVerificationStatus;
 use App\Filament\App\Resources\Monitors\Pages\CreateMonitor;
 use App\Filament\App\Resources\Monitors\Pages\EditMonitor;
 use App\Filament\App\Resources\Monitors\Pages\ListMonitors;
@@ -103,15 +102,14 @@ class MonitorsListPageTest extends TestCase
 
     public function test_only_monitors_on_an_exactly_verified_host_get_an_ownership_badge(): void
     {
-        Website::create([
+        $this->verifyWebsiteOwnership(Website::create([
             'workspace_id' => $this->workspace->id,
             'name' => 'Shop',
             'url' => 'https://shop.test',
             'domain' => 'shop.test',
-            'verification_status' => WebsiteVerificationStatus::Verified,
             'status' => 'active',
             'uptime_monitoring_enabled' => false,
-        ]);
+        ]));
         Monitor::factory()->up()->create(['workspace_id' => $this->workspace->id, 'name' => 'shop', 'url' => 'https://www.shop.test']);
         Monitor::factory()->up()->create(['workspace_id' => $this->workspace->id, 'name' => 'api', 'url' => 'https://api.shop.test']);
         Monitor::factory()->up()->create(['workspace_id' => $this->workspace->id, 'name' => 'stranger', 'url' => 'https://stranger.test']);

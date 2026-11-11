@@ -3,7 +3,7 @@
 namespace App\Filament\App\Widgets;
 
 use App\Enums\BackupRunStatus;
-use App\Enums\WebsiteVerificationStatus;
+use App\Models\Website;
 use App\Models\Workspace;
 use Database\Seeders\DemoWorkspaceSeeder;
 use Filament\Facades\Filament;
@@ -68,9 +68,9 @@ class WorkspaceHealthPulseWidget extends Widget
             return ['hasWorkspace' => false];
         }
 
-        $websites = $workspace->websites;
+        $websites = $workspace->websites()->with('verifiedDomain')->get();
         $totalWebsites = $websites->count();
-        $verifiedWebsites = $websites->where('verification_status', WebsiteVerificationStatus::Verified)->count();
+        $verifiedWebsites = $websites->filter(fn (Website $website): bool => $website->isVerified())->count();
 
         // Check if there are active policies
         $activePoliciesCount = $workspace->backupPolicies()->where('status', 'active')->count();

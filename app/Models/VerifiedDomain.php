@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\WebsiteVerificationStatus;
+use App\Services\Monitoring\WebsiteMonitorSync;
 use App\Services\Verification\OwnershipChallengeChecker;
 use Database\Factories\VerifiedDomainFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,8 +13,9 @@ use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
 /**
- * A domain the workspace proved it controls (DNS TXT or a file on the site) so it may run invasive
- * checks such as port monitoring against it — without creating a backup website.
+ * The single record of domain ownership for a workspace: the challenge token, how it was proven and when.
+ * A backup website links to the row of its domain (website_id) and reads its verification status from it;
+ * port checks and the "verified owner" badges read the same rows.
  */
 class VerifiedDomain extends Model
 {
@@ -30,9 +33,6 @@ class VerifiedDomain extends Model
 
     /** Consecutive failed re-checks that revoke the verification. */
     public const REVOKE_AFTER_FAILURES = 2;
-
-    /** Proven by verifying the backup website in Backup Management (kept in sync automatically). */
-    public const METHOD_BACKUP_WEBSITE = 'backup_website';
 
     protected $fillable = [
         'workspace_id',
@@ -64,6 +64,16 @@ class VerifiedDomain extends Model
                 $verifiedDomain->token = 'sv-verify-'.Str::lower(Str::random(32));
             }
         });
+
+        // A backup website whose domain becomes proven gets its uptime monitor right away.
+        static::saved(function (self $verifiedDomain): void {
+            if ($verifiedDomain->isVerified()
+                && $verifiedDomain->website_id !== null
+                && $verifiedDomain->wasChanged(['verified_at', 'website_id'])
+                && ($website = $verifiedDomain->website()->first()) !== null) {
+                app(WebsiteMonitorSync::class)->ensureMonitorFor($website);
+            }
+        });
     }
 
     public static function normalize(string $domain): string
@@ -89,15 +99,29 @@ class VerifiedDomain extends Model
         return $this->verified_at !== null;
     }
 
+    /**
+     * The domain of a backup website: shown with its website, and its proof gates backups.
+     */
     public function isFromBackupWebsite(): bool
     {
-        return $this->verification_method === self::METHOD_BACKUP_WEBSITE;
+        return $this->website_id !== null;
+    }
+
+    /**
+     * The website-facing status: proven, failed on the last attempt, or waiting for the first check.
+     */
+    public function status(): WebsiteVerificationStatus
+    {
+        return match (true) {
+            $this->isVerified() => WebsiteVerificationStatus::Verified,
+            filled($this->last_error) => WebsiteVerificationStatus::Failed,
+            default => WebsiteVerificationStatus::Pending,
+        };
     }
 
     public function methodLabel(): string
     {
         return match ($this->verification_method) {
-            self::METHOD_BACKUP_WEBSITE => 'backup website verification',
             'html_file' => 'verification file',
             'meta_tag' => 'HTML meta tag',
             'dns_txt' => 'DNS TXT record',

@@ -126,11 +126,6 @@ class Workspace extends Model implements HasName
         return $this->hasMany(MonitorIncident::class);
     }
 
-    public function websiteVerifications(): HasMany
-    {
-        return $this->hasMany(WebsiteVerification::class);
-    }
-
     public function serverConnections(): HasMany
     {
         return $this->hasMany(ServerConnection::class);

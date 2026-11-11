@@ -6,7 +6,6 @@ use App\Enums\BackupScope;
 use App\Enums\BackupStrategy;
 use App\Enums\DownloadMode;
 use App\Enums\ScheduleFrequency;
-use App\Enums\WebsiteVerificationStatus;
 use App\Models\BackupTemplate;
 use App\Models\ServerConnection;
 use App\Models\StorageConnection;
@@ -63,7 +62,7 @@ class BackupPolicyForm
 
                                                 return Website::query()
                                                     ->where('workspace_id', $tenant?->id)
-                                                    ->where('verification_status', WebsiteVerificationStatus::Verified)
+                                                    ->ownershipVerified()
                                                     ->pluck('name', 'id');
                                             })
                                             ->live()

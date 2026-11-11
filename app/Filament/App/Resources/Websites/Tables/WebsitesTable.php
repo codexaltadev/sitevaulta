@@ -5,10 +5,12 @@ namespace App\Filament\App\Resources\Websites\Tables;
 use App\Enums\VerificationMethod;
 use App\Enums\WebsiteVerificationStatus;
 use App\Models\ServerConnection;
+use App\Models\VerifiedDomain;
 use App\Models\Website;
 use App\Services\Notifications\WorkspaceAlertDispatcher;
 use App\Services\Security\WebsiteSecurityScannerService;
 use App\Services\Verification\DomainVerificationService;
+use App\Services\Verification\OwnershipChallengeChecker;
 use App\Services\Verification\WebsiteUptimeMonitorService;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
@@ -29,6 +31,7 @@ class WebsitesTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn ($query) => $query->with('verifiedDomain'))
             ->columns([
                 TextColumn::make('name')
                     ->label('Website')
@@ -43,18 +46,22 @@ class WebsitesTable
                 TextColumn::make('environment')
                     ->badge(),
 
-                TextColumn::make('verification_status')
+                // Read from the domain's ownership record (verified_domains), the single source of truth.
+                TextColumn::make('ownership')
                     ->label('Ownership Status')
                     ->badge()
+                    ->state(fn (Website $record): WebsiteVerificationStatus => $record->verificationStatus())
                     ->formatStateUsing(fn (WebsiteVerificationStatus $state): string => $state === WebsiteVerificationStatus::Verified ? 'Verified Owner' : $state->label())
                     ->icon(fn (WebsiteVerificationStatus $state): Heroicon => match ($state) {
                         WebsiteVerificationStatus::Verified => Heroicon::OutlinedShieldCheck,
                         WebsiteVerificationStatus::Failed => Heroicon::OutlinedShieldExclamation,
                         default => Heroicon::OutlinedClock,
                     })
-                    ->tooltip(fn (WebsiteVerificationStatus $state): string => $state === WebsiteVerificationStatus::Verified
-                        ? 'Ownership proven — this domain also counts as verified for uptime monitoring (port checks allowed).'
-                        : 'Verify ownership to unlock backups and port checks for this domain.')
+                    ->tooltip(fn (Website $record, WebsiteVerificationStatus $state): string => match ($state) {
+                        WebsiteVerificationStatus::Verified => 'Ownership proven via '.$record->verifiedDomain?->methodLabel().' — this domain also counts as verified for uptime monitoring (port checks allowed).',
+                        WebsiteVerificationStatus::Failed => collect($record->verifiedDomain?->errorLines() ?? [])->map(fn (string $line): string => "✗ {$line}")->implode("\n"),
+                        default => 'Verify ownership to unlock backups and port checks for this domain.',
+                    })
                     ->color(fn (WebsiteVerificationStatus $state): string => $state->color()),
 
                 TextColumn::make('uptime_status')
@@ -221,14 +228,14 @@ class WebsitesTable
                                         '<div style="padding:14px;border-radius:8px;background:var(--sv-bg);color:var(--sv-text);border:1px solid var(--sv-border);line-height:1.7;">'
                                         .'<div><strong style="color:var(--sv-primary);">Token:</strong> <code>%s</code></div>'
                                         .'<div><strong style="color:var(--sv-primary);">DNS TXT Host:</strong> <code>%s</code></div>'
-                                        .'<div><strong style="color:var(--sv-primary);">File Path:</strong> <code>%s</code> or <code>/sitevaulta-verify.txt</code> (web root)</div>'
-                                        .'<div><strong style="color:var(--sv-primary);">Meta Tag:</strong> <code>&lt;meta name="%s" content="%s"&gt;</code></div>'
+                                        .'<div><strong style="color:var(--sv-primary);">File Path:</strong> <code>%s</code> or <code>%s</code> (web root)</div>'
+                                        .'<div><strong style="color:var(--sv-primary);">Meta Tag:</strong> <code>%s</code></div>'
                                         .'</div>',
                                         e($challenge->token),
-                                        e($challenge->dns_host),
-                                        e($challenge->file_path),
-                                        e($challenge->meta_tag_name),
-                                        e($challenge->token)
+                                        e($challenge->dnsRecordName()),
+                                        e(VerifiedDomain::FILE_PATH),
+                                        e(OwnershipChallengeChecker::ROOT_FILE_PATH),
+                                        e($challenge->metaTag()),
                                     ));
                                 }),
 

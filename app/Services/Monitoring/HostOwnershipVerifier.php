@@ -164,21 +164,14 @@ class HostOwnershipVerifier
      */
     private function ownedDomains(Workspace $workspace): Collection
     {
-        $verifiedDomains = $workspace->verifiedDomains()
+        // Backup websites' domains live here too (linked by website_id), so this is the whole picture.
+        return $workspace->verifiedDomains()
             ->whereNotNull('verified_at')
-            ->get(['domain', 'verification_method'])
+            ->get(['domain', 'website_id'])
             ->toBase()
             ->mapWithKeys(fn (VerifiedDomain $verifiedDomain): array => [
                 $verifiedDomain->domain => $verifiedDomain->isFromBackupWebsite() ? 'verified website' : 'verified domain',
             ]);
-
-        $verifiedWebsites = $workspace->websites()
-            ->get(['id', 'domain', 'verification_status'])
-            ->toBase()
-            ->filter(fn (Website $website): bool => $website->isVerified() && filled($website->domain))
-            ->mapWithKeys(fn (Website $website): array => [VerifiedDomain::normalize($website->domain) => 'verified website']);
-
-        return $verifiedWebsites->merge($verifiedDomains);
     }
 
     /**

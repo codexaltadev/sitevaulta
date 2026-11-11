@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Enums\WebsiteVerificationStatus;
 use App\Filament\App\Resources\Monitors\Pages\ViewMonitor;
 use App\Models\Monitor;
 use App\Models\MonitorCheck;
@@ -177,7 +176,7 @@ class MonitorDetailPageTest extends TestCase
 
     public function test_ownership_panel_shows_verified_owner_for_a_verified_backup_website(): void
     {
-        Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Shop', 'url' => 'https://shop.test', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
+        $this->verifyWebsiteOwnership(Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Shop', 'url' => 'https://shop.test', 'uptime_monitoring_enabled' => false]));
         $monitor = Monitor::factory()->up()->create(['workspace_id' => $this->workspace->id, 'url' => 'https://shop.test']);
 
         $this->actingAs($this->user)

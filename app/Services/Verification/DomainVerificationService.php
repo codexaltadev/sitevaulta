@@ -4,77 +4,83 @@ namespace App\Services\Verification;
 
 use App\DataTransferObjects\VerificationResult;
 use App\Enums\VerificationMethod;
-use App\Enums\WebsiteVerificationStatus;
+use App\Models\VerifiedDomain;
 use App\Models\Website;
-use App\Models\WebsiteVerification;
+use App\Services\Monitoring\VerifiedDomainSync;
 use App\Services\Security\AuditLogService;
 use App\Services\Security\SsrfValidator;
-use Illuminate\Support\Str;
+use Throwable;
 
+/**
+ * Ownership verification of a backup website. The challenge and the result live on the verified_domains
+ * row of the website's domain — the same record port checks and the Verified domains page use.
+ */
 class DomainVerificationService
 {
-    public static function ensureChallengeExists(Website $website): WebsiteVerification
+    /**
+     * The website's ownership record (created pending, with a fresh token, when missing).
+     */
+    public static function ensureChallengeExists(Website $website): VerifiedDomain
     {
-        $challenge = $website->latestVerification()->first();
-        if ($challenge && $challenge->expires_at->isFuture()) {
-            return $challenge;
+        $verifiedDomain = $website->verifiedDomain()->first() ?? app(VerifiedDomainSync::class)->linkWebsite($website);
+
+        if ($verifiedDomain === null) {
+            throw new \InvalidArgumentException('The website has no domain to verify.');
         }
 
-        $token = 'sv-verify-'.Str::lower(Str::random(32));
+        $website->setRelation('verifiedDomain', $verifiedDomain);
 
-        return WebsiteVerification::create([
-            'workspace_id' => $website->workspace_id,
-            'website_id' => $website->id,
-            'token' => $token,
-            'dns_host' => OwnershipChallengeChecker::DNS_PREFIX.$website->domain,
-            'file_path' => OwnershipChallengeChecker::FILE_PATH,
-            'meta_tag_name' => OwnershipChallengeChecker::META_TAG_NAME,
-            'expires_at' => now()->utc()->addDays(14),
-        ]);
+        return $verifiedDomain;
     }
 
     public static function verifyWebsite(Website $website, VerificationMethod $method): VerificationResult
     {
-        $challenge = self::ensureChallengeExists($website);
+        $verifiedDomain = self::ensureChallengeExists($website);
 
         try {
-            SsrfValidator::assertSafeHost($website->domain);
-        } catch (\Throwable $e) {
-            $challenge->update([
-                'last_checked_at' => now()->utc(),
-                'last_error' => $e->getMessage(),
-            ]);
+            SsrfValidator::assertSafeHost($verifiedDomain->domain);
+        } catch (Throwable $exception) {
+            self::recordFailure($verifiedDomain, $exception->getMessage());
 
-            return new VerificationResult(false, $method, $e->getMessage());
+            return new VerificationResult(false, $method, $exception->getMessage());
         }
 
         // Same checks as domain/monitor ownership verification.
-        $result = app(OwnershipChallengeChecker::class)->check($method, (string) $website->domain, $challenge->token, $website->url);
+        $result = app(OwnershipChallengeChecker::class)->check($method, $verifiedDomain->domain, $verifiedDomain->token, $website->url);
 
-        $challenge->update([
-            'last_checked_at' => now()->utc(),
-            'last_error' => $result->verified ? null : $result->message,
-        ]);
+        if (! $result->verified) {
+            self::recordFailure($verifiedDomain, $result->message);
 
-        if ($result->verified) {
-            $website->update([
-                'verification_status' => WebsiteVerificationStatus::Verified,
-                'verified_at' => now()->utc(),
-                'verification_method' => $method,
-            ]);
-
-            AuditLogService::log(
-                event: 'website.verified',
-                auditable: $website,
-                metadata: ['method' => $method->value, 'domain' => $website->domain],
-                workspaceId: $website->workspace_id
-            );
-        } else {
-            $website->update([
-                'verification_status' => WebsiteVerificationStatus::Failed,
-            ]);
+            return $result;
         }
 
+        $verifiedDomain->update([
+            'verified_at' => $verifiedDomain->verified_at ?? now()->utc(),
+            'verification_method' => $method->value,
+            'last_attempted_at' => now()->utc(),
+            'last_error' => null,
+            'reverify_failures' => 0,
+        ]);
+
+        AuditLogService::log(
+            event: 'website.verified',
+            auditable: $website,
+            metadata: ['method' => $method->value, 'domain' => $verifiedDomain->domain],
+            workspaceId: $website->workspace_id
+        );
+
         return $result;
+    }
+
+    /**
+     * A failed manual re-check never revokes a website that is already proven (backups keep running);
+     * only an unproven domain records the reason.
+     */
+    private static function recordFailure(VerifiedDomain $verifiedDomain, string $message): void
+    {
+        $verifiedDomain->update([
+            'last_attempted_at' => now()->utc(),
+            'last_error' => $verifiedDomain->isVerified() ? null : mb_substr($message, 0, 500),
+        ]);
     }
 }

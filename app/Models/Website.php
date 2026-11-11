@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
-use App\Enums\VerificationMethod;
 use App\Enums\WebsiteVerificationStatus;
 use App\Services\Monitoring\VerifiedDomainSync;
 use App\Services\Monitoring\WebsiteMonitorSync;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -21,9 +21,6 @@ class Website extends Model
         'url',
         'domain',
         'environment',
-        'verification_status',
-        'verified_at',
-        'verification_method',
         'webhook_secret_hash',
         'known_files_size_bytes',
         'known_db_size_bytes',
@@ -57,9 +54,6 @@ class Website extends Model
     protected function casts(): array
     {
         return [
-            'verification_status' => WebsiteVerificationStatus::class,
-            'verification_method' => VerificationMethod::class,
-            'verified_at' => 'datetime',
             'known_files_size_bytes' => 'integer',
             'known_db_size_bytes' => 'integer',
             'uptime_monitoring_enabled' => 'boolean',
@@ -99,13 +93,14 @@ class Website extends Model
         });
 
         static::created(function (self $website): void {
-            app(VerifiedDomainSync::class)->syncWebsite($website);
+            app(VerifiedDomainSync::class)->linkWebsite($website);
             app(WebsiteMonitorSync::class)->ensureMonitorFor($website);
         });
 
         static::updated(function (self $website): void {
-            if ($website->wasChanged(['domain', 'verification_status'])) {
-                app(VerifiedDomainSync::class)->syncWebsite($website);
+            if ($website->wasChanged('domain')) {
+                app(VerifiedDomainSync::class)->linkWebsite($website);
+                $website->unsetRelation('verifiedDomain');
             }
 
             app(WebsiteMonitorSync::class)->syncFromWebsite($website);
@@ -132,14 +127,25 @@ class Website extends Model
         return $this->belongsTo(Workspace::class);
     }
 
-    public function verifications(): HasMany
+    /**
+     * The ownership record of this website's domain — the single source of its verification status.
+     */
+    public function verifiedDomain(): HasOne
     {
-        return $this->hasMany(WebsiteVerification::class);
+        return $this->hasOne(VerifiedDomain::class);
     }
 
-    public function latestVerification(): HasOne
+    /**
+     * Websites whose domain ownership is proven.
+     */
+    public function scopeOwnershipVerified(Builder $query): void
     {
-        return $this->hasOne(WebsiteVerification::class)->latestOfMany();
+        $query->whereHas('verifiedDomain', fn (Builder $verifiedDomain) => $verifiedDomain->whereNotNull('verified_at'));
+    }
+
+    public function verificationStatus(): WebsiteVerificationStatus
+    {
+        return $this->verifiedDomain?->status() ?? WebsiteVerificationStatus::Unverified;
     }
 
     public function serverConnections(): HasMany
@@ -159,6 +165,6 @@ class Website extends Model
 
     public function isVerified(): bool
     {
-        return $this->verification_status === WebsiteVerificationStatus::Verified;
+        return $this->verifiedDomain?->isVerified() ?? false;
     }
 }
