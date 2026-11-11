@@ -447,7 +447,7 @@ class MonitorTypesTest extends TestCase
     {
         $workspace = Workspace::create(['name' => 'Dhaka', 'slug' => 'dhaka', 'owner_id' => User::factory()->create()->id, 'billing_currency' => 'BDT', 'timezone' => 'Asia/Dhaka']);
         $domain = Monitor::factory()->create(['workspace_id' => $workspace->id, 'type' => MonitorType::Domain, 'url' => null, 'host' => 'example.com.bd', 'expires_at' => CarbonImmutable::parse('2026-12-12 23:59:59', 'UTC')]);
-        $ssl = Monitor::factory()->create(['workspace_id' => $workspace->id, 'type' => MonitorType::Ssl, 'url' => null, 'host' => 'example.com.bd', 'expires_at' => CarbonImmutable::parse('2026-12-12 23:59:59', 'UTC')]);
+        $ssl = Monitor::factory()->create(['workspace_id' => $workspace->id, 'type' => MonitorType::Ssl, 'url' => null, 'host' => 'shop.example.com.bd', 'expires_at' => CarbonImmutable::parse('2026-12-12 23:59:59', 'UTC')]);
 
         $this->assertSame('Dec 12, 2026', $domain->expiryDateLabel());
         $this->assertSame('Dec 13, 2026', $ssl->expiryDateLabel(), 'A certificate expires at a moment: 05:59 on Dec 13 in Dhaka.');
