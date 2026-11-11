@@ -14,6 +14,7 @@ use App\Rules\UniqueWorkspaceTarget;
 use App\Services\Billing\EntitlementService;
 use App\Services\Monitoring\HostOwnershipVerifier;
 use App\Services\Monitoring\MonitorChildChecksSync;
+use App\Services\Monitoring\RegistrableDomain;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
@@ -76,6 +77,9 @@ class MonitorForm
     ];
 
     public const PORT_MIN_INTERVAL_SECONDS = 300;
+
+    /** BTCL's public .bd domain lookup (for people; it is behind a CAPTCHA, so it is never queried automatically). */
+    public const BTCL_DOMAIN_LOOKUP_URL = 'https://bdia.btcl.com.bd/';
 
     /**
      * @var array<int, string>
@@ -350,7 +354,7 @@ class MonitorForm
 
                 DatePicker::make('manual_expires_at')
                     ->label('Expiry date (manual, optional)')
-                    ->helperText('Some registries (e.g. .bd) publish no expiry date. Enter it from your registrar invoice and we alert before it.')
+                    ->helperText(fn (Get $get): HtmlString|string => self::manualExpiryHelp($get('host')))
                     ->native(false)
                     ->visible(fn (Get $get): bool => self::selectedType($get) === MonitorType::Domain),
 
@@ -473,9 +477,7 @@ class MonitorForm
                                     ->default(30),
                                 DatePicker::make('extras.domain.manual_expires_at')
                                     ->label('Expiry date (manual, optional)')
-                                    ->helperText(fn (Get $get): string => str_ends_with((string) self::extraChecksHost($get), '.bd')
-                                        ? '.bd domains publish no expiry date — enter it from your registrar invoice, otherwise the check shows "Unknown".'
-                                        : 'Only needed if the registry publishes no expiry date (e.g. .bd).')
+                                    ->helperText(fn (Get $get): HtmlString|string => self::manualExpiryHelp($get('extras.domain.host') ?: self::extraChecksHost($get)))
                                     ->native(false)
                                     ->columnSpanFull(),
                             ]),
@@ -892,6 +894,23 @@ class MonitorForm
         }
 
         return request()->attributes->get('monitor_form.owned_host_names');
+    }
+
+    /**
+     * The .bd registry publishes no expiry date to machines; BTCL's own lookup (behind a CAPTCHA) shows it
+     * to a person, who can then type it in here.
+     */
+    public static function manualExpiryHelp(?string $host): HtmlString|string
+    {
+        if (! str_ends_with(mb_strtolower(rtrim((string) $host, '.')), '.bd')) {
+            return 'Only needed if the registry publishes no expiry date (e.g. .bd). A date entered once is shared with other checks of the same domain.';
+        }
+
+        return new HtmlString(
+            '.bd domains publish no expiry date automatically. Look it up on BTCL, then enter it here — it is shared with other checks of '
+            .e(RegistrableDomain::of($host) ?? (string) $host).'. '
+            .'<a href="'.e(self::BTCL_DOMAIN_LOOKUP_URL).'" target="_blank" rel="noopener noreferrer" style="color:var(--sv-primary);font-weight:600;">Check on BTCL →</a>'
+        );
     }
 
     private static function verifiedDomainsLink(string $text): HtmlString

@@ -6,6 +6,7 @@ use App\Enums\MonitorIncidentStatus;
 use App\Enums\MonitorStatus;
 use App\Enums\MonitorType;
 use App\Filament\App\Resources\Monitors\Pages\ViewMonitor;
+use App\Filament\App\Resources\Monitors\Schemas\MonitorForm;
 use App\Models\Monitor;
 use App\Models\MonitorIncident;
 use App\Models\User;
@@ -440,6 +441,13 @@ class MonitorTypesTest extends TestCase
         $this->assertSame('shared', $subDomain->last_probe_method);
         $this->assertSame($main->manual_expires_at->toDateString(), $subDomain->expires_at->toDateString());
         $this->assertSame('Expiry date of daffodilvarsity.edu.bd from another domain check in this workspace', $subDomain->probeMethodLabel());
+    }
+
+    public function test_bd_domains_link_to_the_btcl_lookup_for_the_manual_date(): void
+    {
+        $this->assertStringContainsString('href="https://bdia.btcl.com.bd/"', (string) MonitorForm::manualExpiryHelp('elearn.daffodilvarsity.edu.bd'));
+        $this->assertStringContainsString('shared with other checks of daffodilvarsity.edu.bd', (string) MonitorForm::manualExpiryHelp('elearn.daffodilvarsity.edu.bd'));
+        $this->assertStringNotContainsString('btcl', (string) MonitorForm::manualExpiryHelp('example.com'));
     }
 
     public function test_a_failing_expiry_check_is_re_checked_hourly_so_a_renewal_shows_up_soon(): void

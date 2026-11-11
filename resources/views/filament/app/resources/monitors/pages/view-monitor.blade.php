@@ -516,6 +516,15 @@
                     @if ($monitor->probeMethodLabel())
                         <div class="sv-md-kv"><span>Measured via</span><span>{{ $monitor->probeMethodLabel() }}</span></div>
                     @endif
+                    @if ($monitor->type === \App\Enums\MonitorType::Domain && str_ends_with((string) $monitor->host, '.bd'))
+                        <div class="sv-md-kv">
+                            <span>Expiry date</span>
+                            <span>
+                                <a href="{{ \App\Filament\App\Resources\Monitors\Schemas\MonitorForm::BTCL_DOMAIN_LOOKUP_URL }}" target="_blank" rel="noopener noreferrer" style="color:var(--sv-primary);">Check on BTCL ↗</a>
+                                · <a href="{{ \App\Filament\App\Resources\Monitors\MonitorResource::getUrl('edit', ['record' => $monitor->parent_id ?? $monitor]) }}" style="color:var(--sv-primary);">Set date</a>
+                            </span>
+                        </div>
+                    @endif
                     <div class="sv-md-kv"><span>Interval</span><span>{{ $monitor->intervalLabel() }}</span></div>
                     <div class="sv-md-kv"><span>Timeout</span><span>{{ $monitor->timeout_seconds }} sec</span></div>
                     @if ($monitor->type->usesUrl())
