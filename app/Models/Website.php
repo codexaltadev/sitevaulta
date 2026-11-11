@@ -198,6 +198,11 @@ class Website extends Model
         return $this->hasMany(BackupRun::class);
     }
 
+    public function latestBackupRun(): HasOne
+    {
+        return $this->hasOne(BackupRun::class)->latestOfMany();
+    }
+
     public function isVerified(): bool
     {
         return $this->verifiedDomain?->isVerified() ?? false;
