@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\BillingCycle;
 use App\Enums\MonitorStatus;
+use App\Enums\MonitorType;
 use App\Enums\PaymentGateway;
 use App\Enums\SubscriptionStatus;
 use App\Filament\App\Resources\Monitors\Pages\CreateMonitor;
@@ -123,6 +124,23 @@ class MonitorsListPageTest extends TestCase
         $this->assertSame(1, substr_count($html, '✓ VERIFIED OWNER'));
         $this->assertSame(2, substr_count($html, '>UNVERIFIED<'), 'api.shop.test and stranger.test need their own proof.');
         $this->assertStringContainsString('#ownership', $html);
+    }
+
+    public function test_each_monitor_links_to_its_site_in_a_new_tab(): void
+    {
+        Monitor::factory()->up()->create(['workspace_id' => $this->workspace->id, 'name' => 'Shop', 'url' => 'https://shop.test/']);
+        Monitor::factory()->up()->create(['workspace_id' => $this->workspace->id, 'name' => 'Cron', 'type' => MonitorType::Heartbeat, 'url' => null]);
+
+        $this->actingAs($this->user)
+            ->get("/app/{$this->workspace->slug}/monitors")
+            ->assertOk()
+            ->assertSee('href="https://shop.test/" target="_blank" rel="noopener noreferrer nofollow"', false)
+            ->assertSee('aria-label="Open Shop in a new tab"', false)
+            ->assertDontSee('aria-label="Open Cron in a new tab"', false);
+
+        $this->assertSame('https://db.shop.test', (new Monitor(['type' => MonitorType::Ssl, 'host' => 'www.db.shop.test']))->siteUrl());
+        $this->assertNull((new Monitor(['type' => MonitorType::Http, 'url' => 'javascript:alert(1)']))->siteUrl());
+        $this->assertNull((new Monitor(['type' => MonitorType::Port, 'host' => '93.184.216.34']))->siteUrl());
     }
 
     public function test_row_actions_menu_offers_view_check_pause_edit_and_delete(): void

@@ -256,6 +256,23 @@ class Monitor extends Model
     }
 
     /**
+     * The public site behind this monitor, to open it in a browser: the monitored URL, or https://host for
+     * host-based checks. Null for heartbeats and bare IPs. Only http(s) links are ever returned.
+     */
+    public function siteUrl(): ?string
+    {
+        if ($this->type?->usesUrl()) {
+            $scheme = mb_strtolower((string) parse_url((string) $this->url, PHP_URL_SCHEME));
+
+            return in_array($scheme, ['http', 'https'], true) ? (string) $this->url : null;
+        }
+
+        $host = self::normalizeHost($this->host);
+
+        return $host === null || filter_var($host, FILTER_VALIDATE_IP) !== false ? null : "https://{$host}";
+    }
+
+    /**
      * Seconds between checks. A failing expiry check (domain / SSL) is re-checked hourly instead of daily, so
      * a renewal clears the alert within the hour.
      */

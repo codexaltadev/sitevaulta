@@ -55,7 +55,8 @@ html.dark {
 
 /* ---------- Base ---------- */
 *, *::before, *::after { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+/* Decorative blobs and slide-in reveal animations must never let a phone scroll sideways (iOS ignores body overflow-x: hidden). */
+html { scroll-behavior: smooth; scroll-padding-top: 84px; overflow-x: hidden; overflow-x: clip; }
 body {
     margin: 0;
     font-family: var(--font);
@@ -64,6 +65,7 @@ body {
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
+    overflow-x: clip;
     transition: background-color 0.3s, color 0.3s;
 }
 img, svg { display: block; max-width: 100%; }

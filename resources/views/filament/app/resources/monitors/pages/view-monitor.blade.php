@@ -158,7 +158,7 @@
         </div>
 
         <div class="sv-md" style="margin-top:16px;">
-            <div style="display:grid;gap:16px;min-width:0;">
+            <div style="display:grid;grid-template-columns:minmax(0, 1fr);gap:16px;min-width:0;">
                 {{-- Row 1: current status / last check / last 24 hours --}}
                 <div class="sv-md-row3">
                     <div class="sv-md-card">

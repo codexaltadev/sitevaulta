@@ -23,6 +23,28 @@
         .sv-mon-dot.pending { background: var(--sv-muted); }
         .sv-mon-name { font-weight: 600; color: var(--sv-text); font-size: 14px; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
         .sv-mon-name:hover { color: var(--sv-primary); }
+        .sv-mon-info { flex: 1 1 auto; min-width: 0; }
+        .sv-mon-history { flex: none; }
+        /* Phones: name and details across the top, the 24-hour bars full width underneath. */
+        @media (max-width: 640px) {
+            .sv-mon-row { flex-wrap: wrap; row-gap: 8px; padding: 12px; }
+            .sv-mon-dot { order: 1; }
+            /* The name takes the whole first line (next to the dot and the ⋯ menu). */
+            .sv-mon-info { order: 2; flex: 1 1 calc(100% - 90px); }
+            .sv-mon-menu { order: 3; }
+            .sv-mon-incident { order: 4; margin-left: 36px; }
+            .sv-mon-interval { order: 5; margin-left: auto; }
+            .sv-mon-history { order: 6; flex: 1 0 100%; }
+            .sv-mon-history .sv-mon-bars { gap: 2px; }
+            .sv-mon-history .sv-mon-bars span { flex: 1 1 0; width: auto; }
+            .sv-mon-row .sv-mon-meta { white-space: normal; overflow: visible; line-height: 1.8; }
+            .sv-mon-row .sv-mon-pill { display: inline-block; white-space: nowrap; line-height: 1.4; }
+        }
+        .sv-mon-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+        .sv-mon-title .sv-mon-name { min-width: 0; }
+        .sv-mon-visit { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--sv-muted); }
+        .sv-mon-visit:hover, .sv-mon-visit:focus-visible { color: var(--sv-primary); background: var(--sv-bg); }
+        .sv-mon-visit-icon { width: 14px; height: 14px; }
         .sv-mon-meta { font-size: 12px; color: var(--sv-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .sv-mon-pill.sv-mon-unverified { text-decoration: none; border-style: dashed; }
         .sv-mon-pill.sv-mon-unverified:hover { color: var(--sv-primary); border-color: var(--sv-primary); }
@@ -104,8 +126,15 @@
                             @if ($monitor->status === MonitorStatus::Up) ▲ @elseif ($monitor->status === MonitorStatus::Down) ▼ @elseif ($monitor->status === MonitorStatus::Paused) ❚❚ @else • @endif
                         </span>
 
-                        <div style="flex:1 1 auto;min-width:0;">
-                            <a href="{{ MonitorResource::getUrl('view', ['record' => $monitor]) }}" class="sv-mon-name">{{ $monitor->name }}</a>
+                        <div class="sv-mon-info">
+                            <div class="sv-mon-title">
+                                <a href="{{ MonitorResource::getUrl('view', ['record' => $monitor]) }}" class="sv-mon-name">{{ $monitor->name }}</a>
+                                @if ($siteUrl = $monitor->siteUrl())
+                                    <a href="{{ $siteUrl }}" target="_blank" rel="noopener noreferrer nofollow" class="sv-mon-visit" title="Open {{ $siteUrl }} in a new tab" aria-label="Open {{ $monitor->name }} in a new tab">
+                                        <x-filament::icon icon="heroicon-m-arrow-top-right-on-square" class="sv-mon-visit-icon" />
+                                    </a>
+                                @endif
+                            </div>
                             <div class="sv-mon-meta">
                                 <span class="sv-mon-pill">{{ $monitor->type->shortLabel() }}</span>
                                 @if (isset($ownedHosts[$monitor->target_host]))
@@ -136,6 +165,7 @@
 
                         @if ($monitor->ongoingIncident)
                             <a href="{{ \App\Filament\App\Resources\MonitorIncidents\MonitorIncidentResource::getUrl('view', ['record' => $monitor->ongoingIncident]) }}"
+                               class="sv-mon-incident"
                                style="flex:none;font-size:12px;font-weight:600;color:var(--sv-text);background:var(--sv-bg);border:1px solid var(--sv-border);border-radius:6px;padding:3px 9px;text-decoration:none;white-space:nowrap;">
                                 View incident
                             </a>
@@ -143,7 +173,7 @@
 
                         <span class="sv-mon-interval" title="Check interval">⟳ {{ $monitor->intervalLabel() }}</span>
 
-                        <div style="flex:none;">
+                        <div class="sv-mon-history">
                             <div class="sv-mon-bars" title="Last 24 hours, one bar per hour">
                                 @foreach ($stats['bars'] as $bar)
                                     @php

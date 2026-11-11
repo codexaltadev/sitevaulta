@@ -33,18 +33,21 @@ class WebsitesTable
         return $table
             ->modifyQueryUsing(fn ($query) => $query->with('verifiedDomain'))
             ->columns([
+                // On phones only Website, Ownership and Live status show; the domain sits under the name.
                 TextColumn::make('name')
                     ->label('Website')
-                    ->searchable()
+                    ->description(fn (Website $record): ?string => $record->domain)
+                    ->searchable(['name', 'domain'])
                     ->sortable(),
 
                 TextColumn::make('domain')
                     ->label('Domain')
-                    ->searchable()
-                    ->copyable(),
+                    ->copyable()
+                    ->visibleFrom('2xl'),
 
                 TextColumn::make('environment')
-                    ->badge(),
+                    ->badge()
+                    ->visibleFrom('lg'),
 
                 // Read from the domain's ownership record (verified_domains), the single source of truth.
                 TextColumn::make('ownership')
@@ -92,6 +95,7 @@ class WebsitesTable
 
                 TextColumn::make('security_scan_status')
                     ->label('Security & Malware Shield')
+                    ->visibleFrom('lg')
                     ->badge()
                     ->formatStateUsing(fn (?string $state, Website $record): string => match ($state) {
                         'clean' => '🛡️ Clean (0 Threats)',
