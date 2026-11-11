@@ -4,6 +4,7 @@ namespace App\Filament\App\Resources\Monitors\Schemas;
 
 use App\Enums\MonitorType;
 use App\Filament\App\Resources\NotificationChannels\NotificationChannelResource;
+use App\Filament\App\Resources\VerifiedDomains\VerifiedDomainResource;
 use App\Models\Monitor;
 use App\Models\Workspace;
 use App\Rules\AllowedMonitorTypes;
@@ -11,6 +12,7 @@ use App\Rules\OwnedMonitorHost;
 use App\Rules\PublicMonitorDestination;
 use App\Rules\UniqueWorkspaceTarget;
 use App\Services\Billing\EntitlementService;
+use App\Services\Monitoring\HostOwnershipVerifier;
 use App\Services\Monitoring\MonitorChildChecksSync;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -205,9 +207,14 @@ class MonitorForm
                 ToggleButtons::make('type')
                     ->label('Monitor type')
                     ->options(fn (?Monitor $record): array => collect(self::TYPE_TILE_LABELS)
-                        ->map(fn (string $label, string $type): string => in_array($type, self::allowedTypes($record), true) ? $label : "🔒 {$label}")
+                        ->map(fn (string $label, string $type): string => self::typeIsSelectable($type, $record) ? $label : "🔒 {$label}")
                         ->all())
-                    ->disableOptionWhen(fn (mixed $value, ?Monitor $record): bool => ! in_array((string) $value, self::allowedTypes($record), true))
+                    ->disableOptionWhen(fn (mixed $value, ?Monitor $record): bool => ! self::typeIsSelectable((string) $value, $record))
+                    ->hint(fn (?Monitor $record): ?HtmlString => $record === null
+                        && in_array(MonitorType::Port->value, self::allowedTypes($record), true)
+                        && self::ownedHostNames() === []
+                            ? self::verifiedDomainsLink('Port checks unlock after you verify a domain you own.')
+                            : null)
                     ->rules(fn (?Monitor $record): array => [new AllowedMonitorTypes(self::allowedTypes($record))])
                     ->icons([
                         'http' => Heroicon::OutlinedGlobeAlt,
@@ -291,6 +298,16 @@ class MonitorForm
                     ->rule(fn (?Monitor $record): UniqueWorkspaceTarget => new UniqueWorkspaceTarget(self::currentWorkspace(), UniqueWorkspaceTarget::MONITORS, $record?->id))
                     // Port monitoring is a scan, so it needs proof that the workspace owns the host.
                     ->rule(fn (): OwnedMonitorHost => new OwnedMonitorHost(self::currentWorkspace()), fn (Get $get): bool => self::selectedType($get) === MonitorType::Port)
+                    ->datalist(fn (Get $get): array => self::selectedType($get) === MonitorType::Port ? self::ownedHostNames() : [])
+                    ->hint(fn (Get $get): ?string => self::selectedType($get) === MonitorType::Port && filled($get('host'))
+                        ? (self::hostIsOwned($get('host')) ? '✓ Verified owner' : '✗ Ownership not verified')
+                        : null)
+                    ->hintColor(fn (Get $get): string => self::selectedType($get) === MonitorType::Port && self::hostIsOwned($get('host')) ? 'success' : 'danger')
+                    ->helperText(fn (Get $get): HtmlString|string|null => match (true) {
+                        self::selectedType($get) !== MonitorType::Port => null,
+                        filled($get('host')) && ! self::hostIsOwned($get('host')) => self::verifiedDomainsLink('Port checks only run on hosts you have proven you own.'),
+                        default => 'Pick one of your verified domains or servers.',
+                    })
                     ->maxLength(255)
                     ->live(onBlur: true)
                     ->afterStateUpdated(function (?string $state, Get $get, Set $set): void {
@@ -312,6 +329,8 @@ class MonitorForm
                 self::portsInput('ports')
                     ->required(fn (Get $get): bool => self::selectedType($get) === MonitorType::Port)
                     ->visible(fn (Get $get): bool => self::selectedType($get) === MonitorType::Port)
+                    // Ports can only be entered once the host is proven to be the workspace's own.
+                    ->disabled(fn (Get $get): bool => ! self::hostIsOwned($get('host')))
                     ->columnSpanFull(),
 
                 self::dnsRecordTypesInput('dns_record_types')
@@ -396,11 +415,18 @@ class MonitorForm
                     ->hiddenLabel()
                     ->options(fn (Get $get, ?Monitor $record): array => collect(MonitorChildChecksSync::childTypesFor(self::selectedType($get)))
                         ->mapWithKeys(fn (string $type): array => [
-                            $type => (in_array($type, self::allowedExtraTypes($record), true) ? '' : '🔒 ').self::EXTRA_CHECK_LABELS[$type],
+                            $type => (self::extraCheckIsSelectable($type, $get, $record) ? '' : '🔒 ').self::EXTRA_CHECK_LABELS[$type],
                         ])
                         ->all())
-                    ->descriptions(self::EXTRA_CHECK_DESCRIPTIONS)
-                    ->disableOptionWhen(fn (mixed $value, ?Monitor $record): bool => ! in_array((string) $value, self::allowedExtraTypes($record), true))
+                    ->descriptions(fn (Get $get): array => [
+                        ...self::EXTRA_CHECK_DESCRIPTIONS,
+                        ...(self::portExtraCheckIsBlocked($get)
+                            ? ['port' => self::verifiedDomainsLink('Locked: '.(self::extraChecksHost($get) ?? 'this host').' is not verified as yours.')]
+                            : []),
+                    ])
+                    // A port check that is already ticked stays untickable, so a revoked host can still be removed.
+                    ->disableOptionWhen(fn (mixed $value, Get $get, ?Monitor $record): bool => ! self::extraCheckIsSelectable((string) $value, $get, $record)
+                        && ! in_array((string) $value, (array) $get('extra_checks'), true))
                     ->rules(fn (?Monitor $record): array => [new AllowedMonitorTypes(self::allowedExtraTypes($record))])
                     ->columns(['default' => 1, 'sm' => 2])
                     ->live(),
@@ -752,6 +778,18 @@ class MonitorForm
     }
 
     /**
+     * A tile is selectable when the plan allows it; Port additionally needs at least one owned host.
+     */
+    private static function typeIsSelectable(string $type, ?Monitor $record): bool
+    {
+        if (! in_array($type, self::allowedTypes($record), true)) {
+            return false;
+        }
+
+        return $type !== MonitorType::Port->value || $record !== null || self::ownedHostNames() !== [];
+    }
+
+    /**
      * Allowed extra checks, plus any the record already has (kept through a plan downgrade).
      *
      * @return list<string>
@@ -761,6 +799,21 @@ class MonitorForm
         $existing = $record?->children()->pluck('type')->map(fn (MonitorType $type): string => $type->value)->all() ?? [];
 
         return array_values(array_unique([...self::allowedTypes(null), ...$existing]));
+    }
+
+    private static function extraCheckIsSelectable(string $type, Get $get, ?Monitor $record): bool
+    {
+        return in_array($type, self::allowedExtraTypes($record), true)
+            && ! ($type === MonitorType::Port->value && self::portExtraCheckIsBlocked($get));
+    }
+
+    /**
+     * The "Server ports" extra check scans this monitor's own host, so it needs that host to be owned.
+     */
+    private static function portExtraCheckIsBlocked(Get $get): bool
+    {
+        return in_array(MonitorType::Port->value, MonitorChildChecksSync::childTypesFor(self::selectedType($get)), true)
+            && ! self::hostIsOwned(self::extraChecksHost($get));
     }
 
     private static function extraChecksHost(Get $get): ?string
@@ -798,6 +851,52 @@ class MonitorForm
             ->rules(['array', 'max:'.Monitor::MAX_PORTS])
             ->validationMessages(['max' => 'Check at most '.Monitor::MAX_PORTS.' ports per monitor.'])
             ->dehydrateStateUsing(fn (mixed $state): array => Monitor::normalizePorts((array) $state));
+    }
+
+    /**
+     * Whether the workspace has proven it owns the host (exact name, or the IP of an owned domain/server).
+     * Memoised for the request because the form re-renders on every live update.
+     */
+    private static function hostIsOwned(?string $host): bool
+    {
+        $workspace = self::currentWorkspace();
+        $host = Monitor::normalizeHost($host);
+
+        if ($workspace === null || $host === null) {
+            return false;
+        }
+
+        $cache = request()->attributes->get('monitor_form.owned_hosts', []);
+
+        if (! array_key_exists($host, $cache)) {
+            $cache[$host] = app(HostOwnershipVerifier::class)->ownership($workspace, $host)['owned'];
+            request()->attributes->set('monitor_form.owned_hosts', $cache);
+        }
+
+        return $cache[$host];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function ownedHostNames(): array
+    {
+        $workspace = self::currentWorkspace();
+
+        if ($workspace === null) {
+            return [];
+        }
+
+        if (! request()->attributes->has('monitor_form.owned_host_names')) {
+            request()->attributes->set('monitor_form.owned_host_names', app(HostOwnershipVerifier::class)->ownedHostNames($workspace));
+        }
+
+        return request()->attributes->get('monitor_form.owned_host_names');
+    }
+
+    private static function verifiedDomainsLink(string $text): HtmlString
+    {
+        return new HtmlString(e($text).' <a href="'.e(VerifiedDomainResource::getUrl('index')).'" target="_blank" style="color:var(--sv-primary);font-weight:600;">Verify a domain →</a>');
     }
 
     private static function currentWorkspace(): ?Workspace

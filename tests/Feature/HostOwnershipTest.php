@@ -244,6 +244,57 @@ class HostOwnershipTest extends TestCase
         $this->assertSame(VerifiedDomain::METHOD_BACKUP_WEBSITE, VerifiedDomain::where('domain', 'acme.example')->sole()->verification_method);
     }
 
+    public function test_port_type_is_locked_until_the_workspace_owns_a_host_and_a_forged_choice_is_still_rejected(): void
+    {
+        $this->fakeDns();
+        $this->bootAppPanel();
+
+        Livewire::test(CreateMonitor::class)
+            ->assertSee('🔒 Port')
+            ->assertSee('Port checks unlock after you verify a domain you own.')
+            ->fillForm(['type' => 'port', 'name' => 'Bank SSH', 'host' => 'bank.example', 'ports' => ['22'], 'timeout_seconds' => 30])
+            ->call('create')
+            ->assertHasFormErrors(['host']);
+
+        $this->assertSame(0, Monitor::count());
+    }
+
+    public function test_ports_stay_disabled_until_the_host_is_verified(): void
+    {
+        $this->fakeDns();
+        VerifiedDomain::factory()->verified()->create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example']);
+        $this->bootAppPanel();
+
+        Livewire::test(CreateMonitor::class)
+            ->assertDontSee('🔒 Port')
+            ->fillForm(['type' => 'port', 'host' => 'bank.example'])
+            ->assertFormFieldDisabled('ports')
+            ->assertSee('✗ Ownership not verified')
+            ->fillForm(['host' => 'acme.example'])
+            ->assertFormFieldEnabled('ports')
+            ->assertSee('✓ Verified owner');
+    }
+
+    public function test_server_ports_extra_check_is_locked_for_a_host_that_is_not_owned(): void
+    {
+        $this->fakeDns();
+        VerifiedDomain::factory()->verified()->create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example']);
+        $this->bootAppPanel();
+
+        Livewire::test(CreateMonitor::class)
+            ->fillForm(['type' => 'http', 'name' => 'Bank', 'url' => 'https://bank.example/'])
+            ->assertSee('Locked: bank.example is not verified as yours.')
+            ->fillForm(['extra_checks' => ['port'], 'extras' => ['port' => ['ports' => ['22']]]])
+            ->call('create')
+            ->assertHasFormErrors();
+
+        $this->assertSame(0, Monitor::count(), 'A forged tick is rejected by the server.');
+
+        Livewire::test(CreateMonitor::class)
+            ->fillForm(['type' => 'http', 'name' => 'Acme', 'url' => 'https://acme.example/'])
+            ->assertDontSee('Locked: acme.example');
+    }
+
     public function test_port_monitor_needs_ownership_in_the_form_and_on_every_run(): void
     {
         $this->fakeDns();

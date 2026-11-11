@@ -92,6 +92,22 @@ class HostOwnershipVerifier
     }
 
     /**
+     * Every host name the workspace has proven it owns (verified domains, verified backup websites and
+     * connected servers), e.g. to suggest them in the port-check form.
+     *
+     * @return list<string>
+     */
+    public function ownedHostNames(Workspace $workspace): array
+    {
+        return $this->ownedDomains($workspace)->keys()
+            ->merge($this->serverHosts($workspace))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+    }
+
+    /**
      * Looks for the token with the same checks as backup-website verification:
      * DNS TXT, then the verification file (/.well-known or web root), then the homepage meta tag.
      */
