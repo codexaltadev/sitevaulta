@@ -174,6 +174,50 @@ class HostOwnershipTest extends TestCase
         $this->assertSame('html_file', $domain->refresh()->verification_method);
     }
 
+    public function test_weekly_reverification_warns_once_then_revokes_and_notifies(): void
+    {
+        $this->fakeDns();
+        Http::fake(['*' => Http::response('', 404)]);
+        $domain = VerifiedDomain::factory()->verified()->create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example', 'last_attempted_at' => now()->subDays(8)]);
+
+        $this->artisan('sitevaulta:reverify-domains')->expectsOutput('Re-verified 0 | warnings 1 | revoked 0');
+        $this->assertTrue($domain->refresh()->isVerified(), 'One miss is only a warning.');
+        $this->assertSame(1, $domain->reverify_failures);
+
+        $this->artisan('sitevaulta:reverify-domains')->expectsOutput('Re-verified 0 | warnings 0 | revoked 0');
+
+        $this->travel(8)->days();
+        $this->artisan('sitevaulta:reverify-domains')->expectsOutput('Re-verified 0 | warnings 0 | revoked 1');
+
+        $this->assertFalse($domain->refresh()->isVerified());
+        $this->assertFalse(app(HostOwnershipVerifier::class)->ownership($this->workspace, 'acme.example')['owned']);
+        $this->assertEqualsCanonicalizing(
+            ['Could not re-verify acme.example', 'Ownership of acme.example is no longer verified'],
+            $this->user->notifications()->get()->pluck('data.title')->all(),
+        );
+    }
+
+    public function test_reverification_that_finds_the_token_resets_the_failure_count(): void
+    {
+        $domain = VerifiedDomain::factory()->verified()->create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example', 'last_attempted_at' => now()->subDays(8), 'reverify_failures' => 1]);
+        $this->mock(NetworkProbe::class, function (MockInterface $mock) use ($domain): void {
+            $mock->shouldReceive('dnsRecords')->andReturn([$domain->token]);
+        });
+
+        $this->artisan('sitevaulta:reverify-domains')->expectsOutput('Re-verified 1 | warnings 0 | revoked 0');
+
+        $this->assertSame(0, $domain->refresh()->reverify_failures);
+        $this->assertTrue($domain->isVerified());
+    }
+
+    public function test_backup_website_domains_are_not_reverified_here(): void
+    {
+        Website::create(['workspace_id' => $this->workspace->id, 'name' => 'Acme', 'url' => 'https://acme.example', 'verification_status' => WebsiteVerificationStatus::Verified, 'uptime_monitoring_enabled' => false]);
+        VerifiedDomain::query()->update(['last_attempted_at' => now()->subDays(30)]);
+
+        $this->artisan('sitevaulta:reverify-domains')->expectsOutput('Re-verified 0 | warnings 0 | revoked 0');
+    }
+
     public function test_failed_verification_explains_all_three_options(): void
     {
         $this->fakeDns();

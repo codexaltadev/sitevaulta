@@ -24,6 +24,12 @@ class VerifiedDomain extends Model
 
     public const META_TAG_NAME = OwnershipChallengeChecker::META_TAG_NAME;
 
+    /** Verified domains are re-checked this often (days). */
+    public const REVERIFY_AFTER_DAYS = 7;
+
+    /** Consecutive failed re-checks that revoke the verification. */
+    public const REVOKE_AFTER_FAILURES = 2;
+
     /** Proven by verifying the backup website in Backup Management (kept in sync automatically). */
     public const METHOD_BACKUP_WEBSITE = 'backup_website';
 
@@ -36,6 +42,7 @@ class VerifiedDomain extends Model
         'verified_at',
         'last_attempted_at',
         'last_error',
+        'reverify_failures',
     ];
 
     protected function casts(): array
@@ -43,6 +50,7 @@ class VerifiedDomain extends Model
         return [
             'verified_at' => 'datetime',
             'last_attempted_at' => 'datetime',
+            'reverify_failures' => 'integer',
         ];
     }
 

@@ -12,3 +12,4 @@ Schedule::command('sitevaulta:dispatch-scheduled-backups')->everyMinute()->witho
 Schedule::command('sitevaulta:check-websites-uptime')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('sitevaulta:check-monitors')->everyMinute()->withoutOverlapping(10);
 Schedule::command('sitevaulta:prune-monitor-data')->dailyAt('03:15')->withoutOverlapping();
+Schedule::command('sitevaulta:reverify-domains')->dailyAt('04:10')->withoutOverlapping();

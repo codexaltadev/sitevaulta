@@ -110,6 +110,40 @@ class HostOwnershipVerifier
     }
 
     /**
+     * Periodic re-check of an already verified domain. A single miss (DNS hiccup, deploy in progress) only
+     * records a warning; REVOKE_AFTER_FAILURES misses in a row revoke the verification.
+     *
+     * @return 'verified'|'warning'|'revoked'
+     */
+    public function reverify(VerifiedDomain $verifiedDomain): string
+    {
+        $result = $this->challengeChecker->checkAny($verifiedDomain->domain, $verifiedDomain->token);
+
+        if ($result->verified) {
+            $verifiedDomain->forceFill([
+                'last_attempted_at' => now(),
+                'verification_method' => $result->method->value,
+                'last_error' => null,
+                'reverify_failures' => 0,
+            ])->save();
+
+            return 'verified';
+        }
+
+        $failures = $verifiedDomain->reverify_failures + 1;
+        $revoke = $failures >= VerifiedDomain::REVOKE_AFTER_FAILURES;
+
+        $verifiedDomain->forceFill([
+            'last_attempted_at' => now(),
+            'last_error' => mb_substr($result->message, 0, 500),
+            'reverify_failures' => $revoke ? 0 : $failures,
+            'verified_at' => $revoke ? null : $verifiedDomain->verified_at,
+        ])->save();
+
+        return $revoke ? 'revoked' : 'warning';
+    }
+
+    /**
      * @return Collection<string, string> domain => how it was proven
      */
     private function ownedDomains(Workspace $workspace): Collection
