@@ -42,6 +42,7 @@ class MonitorCheckRunner
         private MonitoringIdentity $monitoringIdentity,
         private FirewallBlockDetector $firewallBlockDetector,
         private ProbeHealthCheck $probeHealth,
+        private SlowResponseWatcher $slowResponseWatcher,
     ) {}
 
     /**
@@ -119,8 +120,10 @@ class MonitorCheckRunner
 
         if ($finalProbe['is_up']) {
             $this->recordUp($monitor, $finalProbe);
+            $this->slowResponseWatcher->observe($monitor, $finalProbe['response_time_ms']);
         } else {
             $this->recordDown($monitor, $firstProbe, $finalProbe);
+            $this->slowResponseWatcher->reset($monitor);
         }
 
         // DNS monitors learn their baseline from the records they see first.

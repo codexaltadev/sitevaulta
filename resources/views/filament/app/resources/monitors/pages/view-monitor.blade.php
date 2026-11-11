@@ -164,6 +164,9 @@
                     <div class="sv-md-card">
                         <p class="sv-md-label">Current status</p>
                         <p class="sv-md-value {{ $statusClass }}">{{ $monitor->status->label() }}</p>
+                        @if ($monitor->slow_alerted_at && $monitor->status === MonitorStatus::Up)
+                            <p class="sv-md-sub" style="color:var(--sv-warning);font-weight:600;">🐢 Slow — {{ $monitor->last_response_time_ms }} ms, above your {{ $monitor->slow_threshold_ms }} ms limit</p>
+                        @endif
                         <p class="sv-md-sub">
                             @if (in_array($monitor->status, [MonitorStatus::Up, MonitorStatus::Down], true))
                                 Currently {{ strtolower($monitor->status->label()) }} for

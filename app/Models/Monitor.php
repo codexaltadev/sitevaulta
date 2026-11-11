@@ -51,6 +51,8 @@ class Monitor extends Model
         'last_probe_method',
         'alert_delay_minutes',
         'alert_repeat_minutes',
+        'slow_threshold_ms',
+        'slow_alert_after_checks',
         'alert_channel_ids',
         'notify_workspace_members',
         'interval_seconds',
@@ -78,6 +80,8 @@ class Monitor extends Model
         'expiry_threshold_days' => 14,
         'alert_delay_minutes' => 0,
         'alert_repeat_minutes' => 0,
+        'slow_alert_after_checks' => 3,
+        'consecutive_slow_checks' => 0,
         'notify_workspace_members' => true,
     ];
 
@@ -114,6 +118,10 @@ class Monitor extends Model
             'ping_strict_icmp' => 'boolean',
             'alert_delay_minutes' => 'integer',
             'alert_repeat_minutes' => 'integer',
+            'slow_threshold_ms' => 'integer',
+            'slow_alert_after_checks' => 'integer',
+            'consecutive_slow_checks' => 'integer',
+            'slow_alerted_at' => 'datetime',
             'alert_channel_ids' => 'array',
             'notify_workspace_members' => 'boolean',
         ];

@@ -629,6 +629,30 @@ class MonitorForm
                     ->required()
                     ->columnSpanFull(),
 
+                // Slow-site alert: the site is up, just slow — no incident, an alert and a "back to normal".
+                Grid::make(['default' => 1, 'sm' => 2])
+                    ->visible(fn (Get $get): bool => self::selectedType($get)->usesUrl())
+                    ->columnSpanFull()
+                    ->schema([
+                        TextInput::make('slow_threshold_ms')
+                            ->label('🐢 Alert when slower than')
+                            ->placeholder('Off')
+                            ->suffix('ms')
+                            ->numeric()
+                            ->integer()
+                            ->minValue(100)
+                            ->maxValue(60000)
+                            ->helperText('Leave empty to turn off. A slow site is still up: no incident, no uptime loss.'),
+                        ToggleButtons::make('slow_alert_after_checks')
+                            ->label('For this many checks in a row')
+                            ->options([1 => '1', 2 => '2', 3 => '3', 5 => '5'])
+                            ->inline()
+                            ->grouped()
+                            ->default(3)
+                            ->required()
+                            ->helperText('So a single slow moment does not alert.'),
+                    ]),
+
                 Toggle::make('notify_workspace_members')
                     ->label('🔔 In-app bell for workspace members')
                     ->default(true)

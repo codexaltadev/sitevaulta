@@ -87,9 +87,11 @@ class NotificationChannelForm
                                         'storage_low_space' => 'Storage Destination Low Free Space',
                                         'monitor_down' => 'Uptime Monitor Down (Incident Opened)',
                                         'monitor_up' => 'Uptime Monitor Recovered',
+                                        'monitor_slow' => 'Uptime Monitor Slow (response time above limit)',
+                                        'monitor_fast' => 'Uptime Monitor Response Time Back to Normal',
                                         'monitor_test' => 'Uptime Monitor Test Notification',
                                     ])
-                                    ->default(['backup_failed', 'anomaly_detected', 'storage_low_space', 'monitor_down', 'monitor_up', 'monitor_test'])
+                                    ->default(['backup_failed', 'anomaly_detected', 'storage_low_space', 'monitor_down', 'monitor_up', 'monitor_slow', 'monitor_fast', 'monitor_test'])
                                     ->columns(2)
                                     ->columnSpanFull(),
 
