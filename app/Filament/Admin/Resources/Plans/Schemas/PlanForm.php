@@ -196,6 +196,25 @@ class PlanForm
                             ->default(1)
                             ->required(),
 
+                        TextInput::make('monitor_check_log_days')
+                            ->label('Uptime: detailed check log (days)')
+                            ->helperText('Every single check — the 1h / 24h response-time chart and incident details. Most storage-heavy.')
+                            ->numeric()
+                            ->minValue(2)
+                            ->maxValue(3650)
+                            ->default(30)
+                            ->required(),
+
+                        TextInput::make('monitor_history_days')
+                            ->label('Uptime: history (days)')
+                            ->helperText('Hourly / daily totals — uptime %, the 7-day chart, 30/365-day figures and status page bars.')
+                            ->numeric()
+                            ->minValue(7)
+                            ->maxValue(3650)
+                            ->gte('monitor_check_log_days')
+                            ->default(365)
+                            ->required(),
+
                         CheckboxList::make('allowed_monitor_types')
                             ->label('Allowed monitor types')
                             ->helperText('Customers on this plan can only create these monitor types and extra checks; others show 🔒 and are rejected by the server. Leave everything unticked to allow every type.')

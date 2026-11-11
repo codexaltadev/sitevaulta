@@ -178,6 +178,8 @@ class DatabaseSeeder extends Seeder
                 'max_monitors' => 10,
                 'min_monitor_interval_seconds' => 300,
                 'max_status_pages' => 1,
+                'monitor_check_log_days' => 7,
+                'monitor_history_days' => 90,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,
@@ -208,6 +210,8 @@ class DatabaseSeeder extends Seeder
                 'max_monitors' => 25,
                 'min_monitor_interval_seconds' => 120,
                 'max_status_pages' => 1,
+                'monitor_check_log_days' => 30,
+                'monitor_history_days' => 365,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,
@@ -238,6 +242,8 @@ class DatabaseSeeder extends Seeder
                 'max_monitors' => 100,
                 'min_monitor_interval_seconds' => 60,
                 'max_status_pages' => 5,
+                'monitor_check_log_days' => 90,
+                'monitor_history_days' => 730,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,
@@ -268,6 +274,8 @@ class DatabaseSeeder extends Seeder
                 'max_monitors' => 300,
                 'min_monitor_interval_seconds' => 60,
                 'max_status_pages' => 999,
+                'monitor_check_log_days' => 90,
+                'monitor_history_days' => 730,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,

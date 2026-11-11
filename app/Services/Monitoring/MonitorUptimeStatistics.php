@@ -7,6 +7,7 @@ use App\Enums\MonitorStatus;
 use App\Models\Monitor;
 use App\Models\MonitorIncident;
 use App\Models\Workspace;
+use App\Services\Billing\EntitlementService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -285,7 +286,10 @@ class MonitorUptimeStatistics
         $periodStart = $now->subDays($days);
 
         // Hourly totals while they are kept; whole days beyond that (e.g. the 365-day figure).
-        $useHourly = $days <= (int) config('monitoring.retention.hourly_days', 90);
+        $hourlyDays = $monitor->workspace !== null
+            ? EntitlementService::monitorRetention($monitor->workspace)['hourly_days']
+            : (int) config('monitoring.retention.hourly_days', 90);
+        $useHourly = $days <= $hourlyDays;
 
         $checkTotals = DB::table($useHourly ? 'monitor_hourly_stats' : 'monitor_daily_stats')
             ->where('monitor_id', $monitor->id)

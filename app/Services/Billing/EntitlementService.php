@@ -97,6 +97,26 @@ class EntitlementService
             : array_column(MonitorType::cases(), 'value');
     }
 
+    /**
+     * How long the workspace's uptime data is kept (plan setting, overridable per subscription; config
+     * defaults without a plan). Hourly totals are kept at least 90 days or as long as the check log,
+     * but never longer than the history.
+     *
+     * @return array{check_log_days: int, hourly_days: int, history_days: int}
+     */
+    public static function monitorRetention(Workspace $workspace): array
+    {
+        $sub = $workspace->currentSubscription;
+        $checkLogDays = max(2, $sub?->plan ? $sub->effectiveLimit('monitor_check_log_days') : (int) config('monitoring.retention.raw_days', 30));
+        $historyDays = max(7, $checkLogDays, $sub?->plan ? $sub->effectiveLimit('monitor_history_days') : (int) config('monitoring.retention.daily_days', 730));
+
+        return [
+            'check_log_days' => $checkLogDays,
+            'hourly_days' => min($historyDays, max($checkLogDays, (int) config('monitoring.retention.hourly_days', 90))),
+            'history_days' => $historyDays,
+        ];
+    }
+
     public static function minMonitorIntervalSeconds(Workspace $workspace): int
     {
         $sub = $workspace->currentSubscription;

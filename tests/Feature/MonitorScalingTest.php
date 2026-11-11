@@ -2,9 +2,17 @@
 
 namespace Tests\Feature;
 
+use App\Enums\BillingCycle;
+use App\Enums\PaymentGateway;
+use App\Enums\SubscriptionStatus;
 use App\Jobs\Monitoring\RunMonitorCheckJob;
 use App\Models\Monitor;
 use App\Models\MonitorCheck;
+use App\Models\Plan;
+use App\Models\Subscription;
+use App\Models\User;
+use App\Models\Workspace;
+use App\Services\Billing\EntitlementService;
 use App\Services\Monitoring\MonitorCheckRunner;
 use App\Services\Monitoring\MonitorUptimeStatistics;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -110,6 +118,43 @@ class MonitorScalingTest extends TestCase
         $this->assertSame(2, $monitor->checks()->count());
         $this->assertSame(75.0, app(MonitorUptimeStatistics::class)->monitorPeriodSummary($monitor, 90)['uptime_percent']);
         $this->assertSame(now()->subDays(45)->toDateTimeString(), $monitor->refresh()->first_checked_at->toDateTimeString());
+    }
+
+    public function test_each_workspace_keeps_uptime_data_as_long_as_its_plan_says(): void
+    {
+        $this->freezeTime();
+        $free = $this->workspaceOnPlan('free', checkLogDays: 7, historyDays: 30);
+        $pro = $this->workspaceOnPlan('pro', checkLogDays: 90, historyDays: 730);
+
+        $this->assertSame(['check_log_days' => 7, 'hourly_days' => 30, 'history_days' => 30], EntitlementService::monitorRetention($free));
+        $this->assertSame(['check_log_days' => 90, 'hourly_days' => 90, 'history_days' => 730], EntitlementService::monitorRetention($pro));
+
+        foreach ([$free, $pro] as $workspace) {
+            $monitor = Monitor::factory()->up()->create(['workspace_id' => $workspace->id]);
+            MonitorCheck::factory()->for($monitor)->create(['checked_at' => now()->subDays(10)]);
+            MonitorCheck::factory()->for($monitor)->create(['checked_at' => now()->subDays(40)]);
+            MonitorCheck::factory()->for($monitor)->create(['checked_at' => now()->subDay()]);
+        }
+
+        $this->artisan('sitevaulta:prune-monitor-data')->assertSuccessful();
+
+        $this->assertSame(1, $free->monitors()->sole()->checks()->count(), 'Free keeps 7 days of checks.');
+        $this->assertSame(3, $pro->monitors()->sole()->checks()->count(), 'Pro keeps 90 days.');
+        $this->assertSame(2, DB::table('monitor_daily_stats')->where('monitor_id', $free->monitors()->sole()->id)->count(), 'Free keeps 30 days of history: the 40-day-old day is gone.');
+        $this->assertSame(3, DB::table('monitor_daily_stats')->where('monitor_id', $pro->monitors()->sole()->id)->count());
+    }
+
+    private function workspaceOnPlan(string $code, int $checkLogDays, int $historyDays): Workspace
+    {
+        $workspace = Workspace::create(['name' => $code, 'slug' => $code, 'owner_id' => User::factory()->create()->id, 'billing_currency' => 'BDT', 'timezone' => 'UTC']);
+        $plan = Plan::create(['code' => $code, 'name' => $code, 'max_monitors' => 10, 'features' => [], 'monitor_check_log_days' => $checkLogDays, 'monitor_history_days' => $historyDays]);
+        Subscription::create([
+            'workspace_id' => $workspace->id, 'plan_id' => $plan->id, 'status' => SubscriptionStatus::Active,
+            'billing_cycle' => BillingCycle::Monthly, 'gateway' => PaymentGateway::None,
+            'current_period_starts_at' => now(), 'current_period_ends_at' => now()->addMonth(),
+        ]);
+
+        return $workspace;
     }
 
     public function test_totals_can_be_rebuilt_from_raw_checks(): void
