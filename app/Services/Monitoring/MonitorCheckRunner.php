@@ -35,7 +35,6 @@ class MonitorCheckRunner
     private const DNS_MAX_KNOWN_ADDRESSES = 20;
 
     public function __construct(
-        private WebsiteMonitorSync $websiteMonitorSync,
         private NetworkProbe $networkProbe,
         private IncidentAlertNotifier $alertNotifier,
         private DestinationGuard $destinationGuard,
@@ -127,10 +126,6 @@ class MonitorCheckRunner
         // DNS monitors learn their baseline from the records they see first.
         if (array_key_exists('dns_baseline', $finalProbe) && $finalProbe['dns_baseline'] !== $monitor->dns_baseline) {
             $monitor->forceFill(['dns_baseline' => $finalProbe['dns_baseline'] ?: null])->saveQuietly();
-        }
-
-        if ($monitor->website_id !== null) {
-            $this->websiteMonitorSync->pushResultToWebsite($monitor);
         }
 
         return $check;

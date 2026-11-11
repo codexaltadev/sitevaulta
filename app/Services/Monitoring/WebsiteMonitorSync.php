@@ -8,8 +8,8 @@ use App\Models\Website;
 use App\Services\Billing\EntitlementService;
 
 /**
- * Keeps every backup Website paired with one HTTP(s) Monitor, so the standalone monitoring engine
- * owns website uptime while the legacy website columns (Websites table, client PDF reports) stay filled.
+ * Keeps every backup Website paired with one HTTP(s) Monitor. The monitor owns the website's uptime;
+ * the website reads it through accessors (Website::uptime_status etc.) and keeps no copy.
  */
 class WebsiteMonitorSync
 {
@@ -89,30 +89,6 @@ class WebsiteMonitorSync
         if ($changes !== []) {
             $monitor->update($changes);
         }
-    }
-
-    /**
-     * Copies the monitor's latest HTTP result into the website's legacy uptime columns.
-     */
-    public function pushResultToWebsite(Monitor $monitor): void
-    {
-        $website = $monitor->website;
-
-        if ($website === null) {
-            return;
-        }
-
-        $website->forceFill([
-            'uptime_status' => match ($monitor->status) {
-                MonitorStatus::Up => 'online',
-                MonitorStatus::Down => 'down',
-                default => $website->uptime_status,
-            },
-            'last_http_status_code' => $monitor->last_http_status_code,
-            'last_response_time_ms' => $monitor->last_response_time_ms,
-            'last_uptime_checked_at' => $monitor->last_checked_at,
-            'last_down_reason' => $monitor->status === MonitorStatus::Down ? $monitor->last_error : null,
-        ])->saveQuietly();
     }
 
     public static function monitorUrlFor(Website $website): string

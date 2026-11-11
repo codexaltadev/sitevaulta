@@ -179,10 +179,59 @@ class WebsiteMonitorUnificationTest extends TestCase
         $this->createWebsite(['name' => 'Unmonitored', 'url' => 'https://unmonitored.test', 'domain' => 'unmonitored.test']);
 
         $this->artisan('sitevaulta:check-websites-uptime')
-            ->expectsOutput('Checked 2 verified websites | Server & SSL only (monitor-linked): 1 | Legacy full check: 1')
+            ->expectsOutput('Refreshed server & SSL health of 2 verified websites | New uptime monitors: 0')
             ->assertSuccessful();
 
+        // No HTTP request at all: the website keeps no separate uptime check of its own.
         $this->assertSame(0, $monitored->monitors()->sole()->checks()->count());
+    }
+
+    public function test_website_uptime_is_read_from_its_monitor_without_a_copy(): void
+    {
+        $website = $this->createWebsite();
+        $this->assertSame('unknown', $website->uptime_status);
+
+        $website->uptimeMonitor->update([
+            'status' => MonitorStatus::Down,
+            'last_error' => 'HTTP 502 Bad Gateway',
+            'last_http_status_code' => 502,
+            'last_checked_at' => now(),
+        ]);
+        $website->unsetRelation('uptimeMonitor');
+
+        $this->assertSame('down', $website->uptime_status);
+        $this->assertSame(502, $website->last_http_status_code);
+        $this->assertSame('HTTP 502 Bad Gateway', $website->last_down_reason);
+        $this->assertNotNull($website->last_uptime_checked_at);
+        $this->assertArrayNotHasKey('uptime_status', $website->getAttributes());
+    }
+
+    public function test_websites_page_shows_ownership_and_uptime_from_their_single_sources(): void
+    {
+        $owner = $this->workspace->owner;
+        $this->workspace->members()->attach($owner->id, ['role' => 'owner']);
+        $website = $this->createWebsite();
+        $website->uptimeMonitor->update(['status' => MonitorStatus::Up, 'last_http_status_code' => 200, 'last_response_time_ms' => 321, 'last_checked_at' => now()]);
+        $this->createWebsite(['name' => 'Pending site', 'url' => 'https://pending.test'], verified: false);
+
+        $this->actingAs($owner)
+            ->get("/app/{$this->workspace->slug}/websites")
+            ->assertOk()
+            ->assertSee('Verified Owner')
+            ->assertSee('Verification Pending')
+            ->assertSee('🟢 Online (200 • 321ms)');
+    }
+
+    public function test_live_check_of_an_unmonitored_website_says_so_instead_of_guessing(): void
+    {
+        Http::preventStrayRequests();
+        $this->subscribeToPlan(maxMonitors: 0);
+        $website = $this->createWebsite();
+
+        $result = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website);
+
+        $this->assertSame('unknown', $result['uptime_status']);
+        $this->assertStringContainsString('Uptime is not monitored', $result['message']);
     }
 
     public function test_sync_command_backfills_monitors_for_existing_websites(): void

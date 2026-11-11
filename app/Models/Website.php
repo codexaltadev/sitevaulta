@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Enums\MonitorStatus;
 use App\Enums\WebsiteVerificationStatus;
 use App\Services\Monitoring\VerifiedDomainSync;
 use App\Services\Monitoring\WebsiteMonitorSync;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -26,16 +29,11 @@ class Website extends Model
         'known_db_size_bytes',
         'status',
         'uptime_monitoring_enabled',
-        'uptime_status',
-        'last_http_status_code',
-        'last_response_time_ms',
         'server_live_status',
         'ssl_status',
         'ssl_issuer',
         'ssl_expires_at',
         'ssl_days_remaining',
-        'last_uptime_checked_at',
-        'last_down_reason',
         'uptime_alert_email',
         'uptime_email_provider_mode',
         'notify_on_downtime',
@@ -57,11 +55,8 @@ class Website extends Model
             'known_files_size_bytes' => 'integer',
             'known_db_size_bytes' => 'integer',
             'uptime_monitoring_enabled' => 'boolean',
-            'last_http_status_code' => 'integer',
-            'last_response_time_ms' => 'integer',
             'ssl_expires_at' => 'datetime',
             'ssl_days_remaining' => 'integer',
-            'last_uptime_checked_at' => 'datetime',
             'notify_on_downtime' => 'boolean',
             'notify_on_recovery' => 'boolean',
             'notify_on_malware_detected' => 'boolean',
@@ -110,6 +105,46 @@ class Website extends Model
     public function monitors(): HasMany
     {
         return $this->hasMany(Monitor::class);
+    }
+
+    /**
+     * The HTTP monitor that owns this website's uptime (its main monitor, not an extra check).
+     */
+    public function uptimeMonitor(): HasOne
+    {
+        return $this->hasOne(Monitor::class)->whereNull('parent_id');
+    }
+
+    /**
+     * "online", "down" or "unknown", read from the linked monitor (the website keeps no copy).
+     */
+    protected function uptimeStatus(): Attribute
+    {
+        return Attribute::get(fn (): string => match ($this->uptimeMonitor?->status) {
+            MonitorStatus::Up => 'online',
+            MonitorStatus::Down => 'down',
+            default => 'unknown',
+        });
+    }
+
+    protected function lastHttpStatusCode(): Attribute
+    {
+        return Attribute::get(fn (): ?int => $this->uptimeMonitor?->last_http_status_code);
+    }
+
+    protected function lastResponseTimeMs(): Attribute
+    {
+        return Attribute::get(fn (): ?int => $this->uptimeMonitor?->last_response_time_ms);
+    }
+
+    protected function lastUptimeCheckedAt(): Attribute
+    {
+        return Attribute::get(fn (): ?CarbonInterface => $this->uptimeMonitor?->last_checked_at);
+    }
+
+    protected function lastDownReason(): Attribute
+    {
+        return Attribute::get(fn (): ?string => $this->uptimeMonitor?->status === MonitorStatus::Down ? $this->uptimeMonitor->last_error : null);
     }
 
     public static function extractDomain(string $url): string

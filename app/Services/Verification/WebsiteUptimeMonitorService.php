@@ -13,282 +13,49 @@ use App\Services\Billing\EmailWalletService;
 use App\Services\Connectors\ServerConnectorManager;
 use App\Services\Monitoring\MonitorCheckRunner;
 use App\Services\Monitoring\NetworkProbe;
+use App\Services\Monitoring\WebsiteMonitorSync;
 use App\Services\Notifications\WorkspaceAlertDispatcher;
-use App\Services\Security\AuditLogService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 
 class WebsiteUptimeMonitorService
 {
     /**
-     * Checks REAL live DNS + HTTP/HTTPS reachability of a Website and its connected Server(s),
-     * updates status metrics, and notifies the owner on Down / Recovery transitions.
+     * Live status of a website: its HTTP uptime always comes from its linked monitor (created on demand
+     * when the plan allows), which records the check, opens/resolves the incident and sends the alerts.
+     * Server-connection and SSL health are refreshed here because they belong to the website.
      *
-     * @return array{is_online: bool, uptime_status: string, http_status: int|null, response_time_ms: int, server_status: string, message: string, email_notified: bool, alert_sent: bool}
+     * @param  int|null  $forceSimulateSslDaysRemaining  demo/testing: pretend the certificate expires in this many days
+     * @return array{is_online: bool, uptime_status: string, http_status: int|null, response_time_ms: int, server_status: string, ssl_status: string, ssl_days_remaining: int|null, ssl_expiry_alert_sent: bool, message: string, email_notified: bool, alert_sent: bool}
      */
-    public static function checkWebsiteLiveStatus(
-        Website $website,
-        ?bool $forceSimulateOnline = null,
-        ?string $forceSimulateReason = null,
-        ?int $forceSimulateSslDaysRemaining = null
-    ): array {
+    public static function checkWebsiteLiveStatus(Website $website, ?int $forceSimulateSslDaysRemaining = null): array
+    {
         $website->loadMissing(['workspace.owner', 'serverConnections']);
 
-        if ($forceSimulateOnline === null && $forceSimulateSslDaysRemaining === null) {
-            $linkedMonitor = $website->monitors()->where('status', '!=', MonitorStatus::Paused)->first();
+        $monitor = app(WebsiteMonitorSync::class)->ensureMonitorFor($website);
 
-            if ($linkedMonitor !== null) {
-                return self::checkThroughLinkedMonitor($website, $linkedMonitor);
-            }
+        if ($monitor !== null && $monitor->status !== MonitorStatus::Paused) {
+            return self::checkThroughLinkedMonitor($website, $monitor, $forceSimulateSslDaysRemaining);
         }
 
-        $previousStatus = $website->uptime_status ?: 'unknown';
-        $startTime = microtime(true);
-
-        $httpOnline = false;
-        $httpStatus = null;
-        $downReasons = [];
-
-        $cleanHost = self::extractCleanHostname($website);
-
-        // 1. Check Website DNS + HTTP/HTTPS Reachability
-        if ($forceSimulateOnline !== null) {
-            $httpOnline = $forceSimulateOnline;
-            $httpStatus = $forceSimulateOnline ? 200 : 503;
-            if (! $forceSimulateOnline) {
-                $downReasons[] = $forceSimulateReason ?: 'Website HTTP 503 Service Unavailable';
-            }
-        } else {
-            // Step 1A: Verify real DNS resolution first (catches fake domains like acme-commerce.example.com)
-            $resolvedIps = self::isReservedOrFakeHost($cleanHost) ? [] : (@gethostbynamel($cleanHost) ?: []);
-
-            if (empty($resolvedIps)) {
-                $httpOnline = false;
-                $httpStatus = 0;
-                $downReasons[] = "DNS resolution failed: domain [{$cleanHost}] does not exist or has no live DNS A record";
-            } else {
-                // Step 1B: Perform real HTTP/HTTPS request
-                try {
-                    $targetUrl = str_contains((string) $website->url, '://')
-                        ? (string) $website->url
-                        : 'https://'.$cleanHost;
-
-                    $response = Http::timeout(10)
-                        ->connectTimeout(6)
-                        ->withoutVerifying()
-                        ->withHeaders(['User-Agent' => 'SiteVaulta-UptimeMonitor/1.0'])
-                        ->get($targetUrl);
-
-                    $httpStatus = $response->status();
-                    if ($response->successful() || ($httpStatus >= 200 && $httpStatus < 400)) {
-                        $httpOnline = true;
-                    } else {
-                        $httpOnline = false;
-                        $downReasons[] = "Website returned HTTP {$httpStatus}";
-                    }
-                } catch (\Throwable $e) {
-                    $httpOnline = false;
-                    $httpStatus = 0;
-                    $downReasons[] = 'Website unreachable: '.str($e->getMessage())->limit(140)->toString();
-                }
-            }
-        }
-
-        $responseTimeMs = max(1, (int) round((microtime(true) - $startTime) * 1000));
-
-        // 2. Check Connected Server Reachability (Supports SSH/SFTP, FTP/FTPS, cPanel API, Vaultix Agent, DB-Only)
-        $serverStatus = 'not_connected';
-        $connections = $website->serverConnections;
-
-        if ($connections->isNotEmpty()) {
-            $serverAllOnline = true;
-            foreach ($connections as $conn) {
-                /** @var ServerConnection $conn */
-                $creds = $conn->file_credentials ?? [];
-                $endpoint = self::resolveServerEndpoint($conn, $website);
-                $serverHost = $endpoint['host'];
-                $serverPort = $endpoint['port'];
-
-                if ($forceSimulateOnline !== null) {
-                    if (! $forceSimulateOnline) {
-                        $serverAllOnline = false;
-                    }
-
-                    continue;
-                }
-
-                // Check if the server host is empty or a reserved RFC 5737 test IP / fake domain
-                if ($serverHost === '' || self::isReservedOrFakeHost($serverHost)) {
-                    $serverAllOnline = false;
-                    $conn->update([
-                        'health_status' => 'unreachable',
-                        'last_tested_at' => now()->utc(),
-                    ]);
-                    $downReasons[] = "Server [{$conn->name} ({$serverHost})] is unreachable (Fake/Test IP or offline host)";
-
-                    continue;
-                }
-
-                if (($creds['simulation_mode'] ?? false) === true) {
-                    if (! $httpOnline) {
-                        $serverAllOnline = false;
-                        $downReasons[] = "Server [{$conn->name}] unreachable";
-                    }
-
-                    continue;
-                }
-
-                // Check live reachability of the server endpoint (API / TCP / Connector)
-                $connReachable = self::probeServerConnectionLive($conn, $serverHost, $serverPort, $httpOnline, $cleanHost);
-                if (! $connReachable['online']) {
-                    $serverAllOnline = false;
-                    $downReasons[] = "Server [{$conn->name} ({$endpoint['display']})] unreachable: {$connReachable['reason']}";
-                }
-            }
-
-            $serverStatus = $serverAllOnline ? 'online' : 'down';
-        }
-
-        $isOverallOnline = $httpOnline && ($serverStatus !== 'down');
-        $newUptimeStatus = $isOverallOnline ? 'online' : 'down';
-        $reasonString = $isOverallOnline ? null : implode(' | ', array_unique($downReasons));
-
-        // 2B. Inspect SSL Certificate Expiry & Persist SSL Telemetry
-        $sslStatus = 'none';
-        $sslIssuer = null;
-        $sslExpiresAt = null;
-        $sslDaysRemaining = null;
-        $sslExpiresFormatted = null;
-
-        if ($forceSimulateSslDaysRemaining !== null) {
-            $sslDaysRemaining = $forceSimulateSslDaysRemaining;
-            $sslIssuer = "Let's Encrypt";
-            $sslExpiresAt = now()->utc()->addDays($forceSimulateSslDaysRemaining);
-            $sslExpiresFormatted = $sslExpiresAt->format('M d, Y');
-            $sslStatus = $sslDaysRemaining <= 0
-                ? 'expired'
-                : ($sslDaysRemaining <= ($website->ssl_expiry_warning_days ?: 14) ? 'expiring_soon' : 'valid');
-        } elseif ($httpOnline && ! self::isReservedOrFakeHost($cleanHost)) {
-            $sslData = self::inspectSslCertificate($cleanHost);
-            if ($sslData['days_remaining'] !== null) {
-                $sslDaysRemaining = (int) $sslData['days_remaining'];
-                $sslIssuer = $sslData['issuer'] ?: 'Unknown CA';
-                $sslExpiresFormatted = $sslData['expires_at'];
-                $sslExpiresAt = $sslData['expires_at'] ? Carbon::parse($sslData['expires_at']) : null;
-                $sslStatus = $sslDaysRemaining <= 0
-                    ? 'expired'
-                    : ($sslDaysRemaining <= ($website->ssl_expiry_warning_days ?: 14) ? 'expiring_soon' : 'valid');
-            }
-        }
-
-        $website->update([
-            'uptime_status' => $newUptimeStatus,
-            'last_http_status_code' => $httpStatus,
-            'last_response_time_ms' => $responseTimeMs,
-            'server_live_status' => $serverStatus,
-            'ssl_status' => $sslStatus,
-            'ssl_issuer' => $sslIssuer,
-            'ssl_expires_at' => $sslExpiresAt,
-            'ssl_days_remaining' => $sslDaysRemaining,
-            'last_uptime_checked_at' => now()->utc(),
-            'last_down_reason' => $reasonString,
-        ]);
-
-        $emailNotified = false;
-
-        // 2C. Send Automatic SSL Certificate Expiry Reminder if expiring within threshold (e.g. <= 14 days)
-        $sslExpiryAlertSent = self::sendSslExpiryAlertIfDue($website, $sslDaysRemaining, $sslIssuer, $sslExpiresFormatted);
-
-        // 3. Notify Owner if Website or Server went DOWN
-        if (! $isOverallOnline && ($website->uptime_monitoring_enabled ?? true)) {
-            $shouldNotifyDown = ($previousStatus !== 'down')
-                || ($website->last_downtime_notified_at === null)
-                || $website->last_downtime_notified_at->diffInMinutes(now()->utc()) >= 60;
-
-            if ($shouldNotifyDown) {
-                $emailNotified = WorkspaceAlertDispatcher::sendWebsiteUptimeAlertEmail(
-                    website: $website,
-                    isDown: true,
-                    reason: $reasonString ?: 'Website or Server is unreachable',
-                    httpStatus: $httpStatus,
-                    responseTimeMs: $responseTimeMs
-                );
-
-                if ($emailNotified) {
-                    $website->update(['last_downtime_notified_at' => now()->utc()]);
-                }
-
-                if ($website->workspace) {
-                    WorkspaceAlertDispatcher::dispatch($website->workspace, 'website_down', [
-                        'website_name' => $website->name,
-                        'domain' => $website->domain,
-                        'reason' => $reasonString ?: 'Unreachable',
-                        'http_status' => $httpStatus,
-                    ]);
-                }
-
-                AuditLogService::log(
-                    event: 'website.uptime.down_detected',
-                    auditable: $website,
-                    metadata: [
-                        'domain' => $website->domain,
-                        'reason' => $reasonString,
-                        'http_status' => $httpStatus,
-                        'email_notified' => $emailNotified,
-                    ],
-                    workspaceId: $website->workspace_id
-                );
-            }
-        }
-
-        // 4. Notify Owner if Website RECOVERED from a previous 'down' state
-        if ($isOverallOnline && $previousStatus === 'down' && ($website->uptime_monitoring_enabled ?? true)) {
-            $emailNotified = WorkspaceAlertDispatcher::sendWebsiteUptimeAlertEmail(
-                website: $website,
-                isDown: false,
-                reason: 'Website & Server Recovered',
-                httpStatus: $httpStatus,
-                responseTimeMs: $responseTimeMs
-            );
-
-            $website->update(['last_downtime_notified_at' => null]);
-
-            if ($website->workspace) {
-                WorkspaceAlertDispatcher::dispatch($website->workspace, 'website_recovered', [
-                    'website_name' => $website->name,
-                    'domain' => $website->domain,
-                    'response_time_ms' => $responseTimeMs,
-                ]);
-            }
-
-            AuditLogService::log(
-                event: 'website.uptime.recovered',
-                auditable: $website,
-                metadata: [
-                    'domain' => $website->domain,
-                    'response_time_ms' => $responseTimeMs,
-                    'email_notified' => $emailNotified,
-                ],
-                workspaceId: $website->workspace_id
-            );
-        }
-
-        $summaryMsg = $isOverallOnline
-            ? "🟢 Online — HTTP {$httpStatus} ({$responseTimeMs} ms) | Server: ".strtoupper($serverStatus)
-            : '🔴 Down — '.($reasonString ?: 'Unreachable');
+        // Not monitored (switched off, paused or no free monitor slot): no HTTP verdict, but the server
+        // connections and the certificate are still checked.
+        $health = self::refreshServerAndSslHealth($website, $forceSimulateSslDaysRemaining);
 
         return [
-            'is_online' => $isOverallOnline,
-            'uptime_status' => $newUptimeStatus,
-            'http_status' => $httpStatus,
-            'response_time_ms' => $responseTimeMs,
-            'server_status' => $serverStatus,
-            'ssl_status' => $sslStatus,
-            'ssl_days_remaining' => $sslDaysRemaining,
-            'ssl_expiry_alert_sent' => $sslExpiryAlertSent,
-            'message' => $summaryMsg,
-            'email_notified' => $emailNotified,
-            'alert_sent' => $emailNotified,
+            'is_online' => false,
+            'uptime_status' => 'unknown',
+            'http_status' => null,
+            'response_time_ms' => 0,
+            'server_status' => $health['server_status'],
+            'ssl_status' => $health['ssl_status'],
+            'ssl_days_remaining' => $health['ssl_days_remaining'],
+            'ssl_expiry_alert_sent' => $health['ssl_expiry_alert_sent'],
+            'message' => ($monitor === null
+                ? '⚪ Uptime is not monitored — turn on uptime monitoring or free a monitor slot in your plan.'
+                : '⏸ Uptime monitoring is paused.').' Server: '.strtoupper($health['server_status']),
+            'email_notified' => $health['server_alert_sent'],
+            'alert_sent' => $health['server_alert_sent'],
         ];
     }
 
@@ -298,19 +65,19 @@ class WebsiteUptimeMonitorService
      *
      * @return array{is_online: bool, uptime_status: string, http_status: int|null, response_time_ms: int, server_status: string, ssl_status: string, ssl_days_remaining: int|null, ssl_expiry_alert_sent: bool, message: string, email_notified: bool, alert_sent: bool}
      */
-    protected static function checkThroughLinkedMonitor(Website $website, Monitor $monitor): array
+    protected static function checkThroughLinkedMonitor(Website $website, Monitor $monitor, ?int $forceSimulateSslDaysRemaining = null): array
     {
         $check = app(MonitorCheckRunner::class)->run($monitor);
-        $website->refresh();
+        $website->unsetRelation('uptimeMonitor');
 
-        $health = self::refreshServerAndSslHealth($website);
+        $health = self::refreshServerAndSslHealth($website, $forceSimulateSslDaysRemaining);
         $httpOnline = $check->status === MonitorStatus::Up;
         $isOnline = $httpOnline && $health['server_status'] !== 'down';
         $reason = collect([$httpOnline ? null : $monitor->refresh()->last_error, $health['server_reason']])->filter()->implode(' | ');
 
         return [
             'is_online' => $isOnline,
-            'uptime_status' => (string) $website->uptime_status,
+            'uptime_status' => $website->uptime_status,
             'http_status' => $check->http_status_code,
             'response_time_ms' => (int) $check->response_time_ms,
             'server_status' => $health['server_status'],
@@ -328,11 +95,11 @@ class WebsiteUptimeMonitorService
     /**
      * Server-connection reachability + SSL certificate telemetry for a website whose HTTP uptime is
      * handled by its linked Monitor. Alerts the owner when the server goes down or recovers, and sends
-     * the SSL expiry reminder. Never touches the website's HTTP uptime columns.
+     * the SSL expiry reminder. HTTP uptime itself is the monitor's.
      *
      * @return array{server_status: string, server_reason: string|null, server_alert_sent: bool, ssl_status: string, ssl_days_remaining: int|null, ssl_expiry_alert_sent: bool}
      */
-    public static function refreshServerAndSslHealth(Website $website): array
+    public static function refreshServerAndSslHealth(Website $website, ?int $forceSimulateSslDaysRemaining = null): array
     {
         $website->loadMissing(['workspace.owner', 'serverConnections']);
         $cleanHost = self::extractCleanHostname($website);
@@ -383,7 +150,15 @@ class WebsiteUptimeMonitorService
         $sslDaysRemaining = $website->ssl_days_remaining;
         $sslExpiresFormatted = $sslExpiresAt?->format('M d, Y');
 
-        if ($httpOnline && ! self::isReservedOrFakeHost($cleanHost)) {
+        if ($forceSimulateSslDaysRemaining !== null) {
+            $sslDaysRemaining = $forceSimulateSslDaysRemaining;
+            $sslIssuer = "Let's Encrypt";
+            $sslExpiresAt = now()->utc()->addDays($forceSimulateSslDaysRemaining);
+            $sslExpiresFormatted = $sslExpiresAt->format('M d, Y');
+            $sslStatus = $sslDaysRemaining <= 0
+                ? 'expired'
+                : ($sslDaysRemaining <= ($website->ssl_expiry_warning_days ?: 14) ? 'expiring_soon' : 'valid');
+        } elseif ($httpOnline && ! self::isReservedOrFakeHost($cleanHost)) {
             $sslData = self::inspectSslCertificate($cleanHost);
 
             if ($sslData['days_remaining'] !== null) {

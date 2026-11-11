@@ -12,7 +12,7 @@ class ListVerifiedDomains extends ListRecords
 
     public function getSubheading(): ?string
     {
-        return 'Every domain whose ownership is proven. Websites verified in Backup Management appear here automatically (Source: Backup website). Each sub-domain needs its own verification.';
+        return 'One place for domain ownership. Every backup website\'s domain is listed here (Source: Backup website) and can be verified from here or from Backup Management. Each sub-domain needs its own verification.';
     }
 
     protected function getHeaderActions(): array

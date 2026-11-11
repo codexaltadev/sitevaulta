@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Website;
+use App\Services\Monitoring\WebsiteMonitorSync;
 use App\Services\Verification\WebsiteUptimeMonitorService;
 use Illuminate\Console\Command;
 
@@ -10,33 +11,31 @@ class CheckWebsiteUptimeCommand extends Command
 {
     protected $signature = 'sitevaulta:check-websites-uptime';
 
-    protected $description = 'Refresh server-connection and SSL health for verified websites. HTTP uptime of websites with a linked monitor is handled by sitevaulta:check-monitors; websites without one (e.g. monitor quota full) still get the legacy full check.';
+    protected $description = 'Refresh server-connection and SSL health for verified websites and give any website without one an uptime monitor. HTTP uptime itself is checked by sitevaulta:check-monitors.';
 
     public function handle(): int
     {
-        $websites = Website::with(['workspace.owner', 'serverConnections'])
-            ->withExists('monitors')
+        $websites = Website::with(['workspace.owner', 'serverConnections', 'uptimeMonitor'])
             ->ownershipVerified()
             ->where('status', 'active')
             ->where('uptime_monitoring_enabled', true)
             ->get();
 
-        $healthOnlyCount = 0;
-        $legacyCount = 0;
+        $sync = app(WebsiteMonitorSync::class);
+        $newMonitors = 0;
 
+        // HTTP uptime is checked by each website's monitor (sitevaulta:check-monitors); this command only
+        // refreshes what belongs to the website itself: server connections and the SSL certificate.
         foreach ($websites as $website) {
-            if ($website->monitors_exists) {
-                WebsiteUptimeMonitorService::refreshServerAndSslHealth($website);
-                $healthOnlyCount++;
-
-                continue;
+            if ($website->uptimeMonitor === null && $sync->ensureMonitorFor($website) !== null) {
+                $newMonitors++;
+                $website->unsetRelation('uptimeMonitor');
             }
 
-            WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website);
-            $legacyCount++;
+            WebsiteUptimeMonitorService::refreshServerAndSslHealth($website);
         }
 
-        $this->info("Checked {$websites->count()} verified websites | Server & SSL only (monitor-linked): {$healthOnlyCount} | Legacy full check: {$legacyCount}");
+        $this->info("Refreshed server & SSL health of {$websites->count()} verified websites | New uptime monitors: {$newMonitors}");
 
         return self::SUCCESS;
     }

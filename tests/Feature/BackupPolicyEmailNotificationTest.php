@@ -211,23 +211,16 @@ class BackupPolicyEmailNotificationTest extends TestCase
 
         $website->update([
             'uptime_monitoring_enabled' => true,
-            'uptime_status' => 'online',
             'uptime_alert_email' => 'owner-alert@example.com',
             'uptime_email_provider_mode' => 'custom_smtp',
             'notify_on_downtime' => true,
             'notify_on_recovery' => true,
         ]);
 
-        // 1. Simulate Website/Server going DOWN
-        $downResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website->fresh(), forceSimulateOnline: false);
-        $this->assertFalse($downResult['is_online']);
-        $this->assertEquals('down', $downResult['uptime_status']);
-        $this->assertTrue($downResult['alert_sent']);
+        // 1. The website's down alert email (sent by its monitor's incident) uses the smart fallback
+        $this->assertTrue(WorkspaceAlertDispatcher::sendWebsiteUptimeAlertEmail($website->fresh(), isDown: true, reason: 'HTTP 503 Service Unavailable', httpStatus: 503));
 
         $workspace->refresh();
-        $website->refresh();
-        $this->assertEquals('down', $website->uptime_status);
-        $this->assertNotNull($website->last_downtime_notified_at);
         // Because custom_smtp was unavailable, it auto-fell back to system_wallet and deducted 1 credit (50 -> 49)
         $this->assertEquals(49, $workspace->email_credits_balance);
 
@@ -249,14 +242,8 @@ class BackupPolicyEmailNotificationTest extends TestCase
             'uptime_email_provider_mode' => 'system_wallet',
         ]);
 
-        // 2. Simulate Website/Server RECOVERING back to ONLINE
-        $recoveryResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus($website->fresh(), forceSimulateOnline: true);
-        $this->assertTrue($recoveryResult['is_online']);
-        $this->assertEquals('online', $recoveryResult['uptime_status']);
-        $this->assertTrue($recoveryResult['alert_sent']);
-
-        $website->refresh();
-        $this->assertEquals('online', $website->uptime_status);
+        // 2. The recovery email falls back to the workspace's own SMTP (no credits needed)
+        $this->assertTrue(WorkspaceAlertDispatcher::sendWebsiteUptimeAlertEmail($website->fresh(), isDown: false, reason: 'Website recovered', httpStatus: 200, responseTimeMs: 120));
         $this->assertEquals(0, $workspace->fresh()->email_credits_balance);
 
         // 3. Real un-simulated check on fake domain acme-commerce.example.com must detect it as DOWN!
@@ -357,7 +344,6 @@ class BackupPolicyEmailNotificationTest extends TestCase
         // 1. Test SSL Certificate Expiry Auto-Reminder (7 days remaining <= 14 day threshold)
         $sslResult = WebsiteUptimeMonitorService::checkWebsiteLiveStatus(
             website: $website->fresh(),
-            forceSimulateOnline: true,
             forceSimulateSslDaysRemaining: 7
         );
 
