@@ -43,6 +43,7 @@ class MonitorCheckRunner
         private FirewallBlockDetector $firewallBlockDetector,
         private ProbeHealthCheck $probeHealth,
         private SlowResponseWatcher $slowResponseWatcher,
+        private RemoteProbeClient $remoteProbes,
     ) {}
 
     /**
@@ -93,6 +94,10 @@ class MonitorCheckRunner
             ]);
         }
 
+        if (! $finalProbe['is_up'] && $finalProbe['root_cause_type'] !== 'blocked') {
+            $finalProbe = $this->confirmFromOtherLocations($monitor, $finalProbe);
+        }
+
         // During planned maintenance a failure is not recorded, opens no incident and alerts no one,
         // so planned downtime never counts against uptime %.
         if (! $finalProbe['is_up'] && $monitor->isUnderMaintenance($now)) {
@@ -114,7 +119,7 @@ class MonitorCheckRunner
             'http_status_code' => $finalProbe['http_status'],
             'response_time_ms' => $finalProbe['response_time_ms'],
             'region' => 'primary',
-            'error_message' => $finalProbe['error'],
+            'error_message' => $finalProbe['error'] ?? ($finalProbe['regional_note'] ?? null),
             'checked_at' => $now,
         ]);
 
@@ -590,6 +595,80 @@ class MonitorCheckRunner
             return $this->blockedResult("ownership of {$monitor->host} is not verified for this workspace (Uptime Monitoring → Verified domains)", $snapshot);
         }
 
+        return $this->scanPorts($monitor, $destination, $snapshot);
+    }
+
+    /**
+     * Majority vote across locations. This server says "down"; every usable probe agent re-checks in parallel.
+     * Down only when most of the locations that answered agree; otherwise the problem is regional, so the
+     * result is treated as up with a note. Without answering agents this server's verdict stands.
+     *
+     * @param  array<string, mixed>  $probe
+     * @return array<string, mixed>
+     */
+    private function confirmFromOtherLocations(Monitor $monitor, array $probe): array
+    {
+        $answered = collect($this->remoteProbes->confirm($monitor))->reject(fn (array $result): bool => $result['verdict'] === 'unavailable');
+
+        if ($answered->isEmpty()) {
+            return $probe;
+        }
+
+        $downElsewhere = $answered->where('verdict', 'down');
+        $upElsewhere = $answered->where('verdict', 'up');
+        $voters = 1 + $answered->count();
+        $downVotes = 1 + $downElsewhere->count();
+
+        if ($downVotes * 2 > $voters) {
+            return [...$probe, 'confirmed_from' => $downElsewhere->map(fn (array $result): string => $result['location']->name)->values()->all()];
+        }
+
+        return [
+            ...$probe,
+            'is_up' => true,
+            'error' => null,
+            'root_cause_type' => null,
+            // The timing is from the failed attempt here; it would distort the response-time chart.
+            'response_time_ms' => null,
+            'http_status' => null,
+            'regional_note' => mb_substr('Not reachable from '.self::PROBE_LOCATION.' ('.$probe['error'].'); OK from '
+                .$upElsewhere->map(fn (array $result): string => $result['location']->name)->implode(', '), 0, 255),
+        ];
+    }
+
+    /**
+     * The location-dependent part of a check, for a probe agent asked by the main server to confirm a
+     * failure. The destination guard still applies; port ownership was already verified by the main server
+     * (the agent has no workspace data). Domain/SSL/DNS facts are the same from everywhere, so not offered.
+     *
+     * @return array{is_up: bool, http_status: int|null, response_time_ms: int|null, error: string|null, root_cause_type: string|null, request_snapshot: array<string, mixed>, response_headers: array<string, mixed>|null, response_body: string|null}
+     */
+    public function probeReachability(Monitor $monitor): array
+    {
+        return match ($monitor->type) {
+            MonitorType::Http, MonitorType::Keyword => $this->probeHttp($monitor),
+            MonitorType::Ping => $this->probePing($monitor),
+            MonitorType::Port => (function () use ($monitor): array {
+                $snapshot = ['host' => $monitor->host, 'ports' => $monitor->portList()];
+                $destination = $this->destinationGuard->inspectHost((string) $monitor->host);
+
+                return $destination['allowed']
+                    ? $this->scanPorts($monitor, $destination, $snapshot)
+                    : $this->blockedResult((string) $destination['reason'], $snapshot);
+            })(),
+            default => throw new \InvalidArgumentException("{$monitor->type->value} checks are not confirmed from other locations."),
+        };
+    }
+
+    /**
+     * @param  array{allowed: bool, ips: list<string>, reason: string|null}  $destination
+     * @param  array<string, mixed>  $snapshot
+     * @return array{is_up: bool, http_status: int|null, response_time_ms: int|null, error: string|null, root_cause_type: string|null, request_snapshot: array<string, mixed>, response_headers: array<string, mixed>|null, response_body: string|null}
+     */
+    private function scanPorts(Monitor $monitor, array $destination, array $snapshot): array
+    {
+        $ports = $monitor->portList();
+
         if ($destination['ips'] === []) {
             return $this->result(false, 'DNS Resolving problem', 'dns', $snapshot, null);
         }
@@ -637,6 +716,7 @@ class MonitorCheckRunner
             'last_response_time_ms' => $probe['response_time_ms'],
             'last_http_status_code' => $probe['http_status'],
             'last_error' => null,
+            'last_regional_note' => $probe['regional_note'] ?? null,
             'last_checked_at' => $now,
             'last_status_changed_at' => $statusChanged ? $now : $monitor->last_status_changed_at,
         ]);
@@ -683,6 +763,7 @@ class MonitorCheckRunner
             'last_response_time_ms' => null,
             'last_http_status_code' => $confirmationProbe['http_status'],
             'last_error' => $confirmationProbe['error'],
+            'last_regional_note' => null,
             'last_checked_at' => $now,
             'last_status_changed_at' => $wasAlreadyDown ? $monitor->last_status_changed_at : $now,
         ]);
@@ -719,7 +800,7 @@ class MonitorCheckRunner
                     'type' => 'confirmed',
                     'message' => $monitor->type->isPassive()
                         ? "Heartbeat deadline passed ({$monitor->heartbeat_grace_seconds}s grace period)"
-                        : "{$confirmationProbe['error']} confirmed by re-check",
+                        : "{$confirmationProbe['error']} confirmed by re-check".(empty($confirmationProbe['confirmed_from']) ? '' : ' and from '.implode(', ', $confirmationProbe['confirmed_from'])),
                     'probe_location' => self::PROBE_LOCATION,
                     'occurred_at' => $now,
                 ],

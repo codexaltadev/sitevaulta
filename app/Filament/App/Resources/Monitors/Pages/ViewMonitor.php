@@ -8,11 +8,13 @@ use App\Enums\MonitorType;
 use App\Filament\App\Resources\Monitors\MonitorResource;
 use App\Models\Monitor;
 use App\Models\MonitorIncident;
+use App\Models\ProbeLocation;
 use App\Models\VerifiedDomain;
 use App\Models\Workspace;
 use App\Services\Monitoring\HostOwnershipVerifier;
 use App\Services\Monitoring\MonitorCheckRunner;
 use App\Services\Monitoring\MonitorUptimeStatistics;
+use App\Services\Monitoring\RemoteProbeClient;
 use App\Services\Notifications\WorkspaceAlertDispatcher;
 use App\Services\Security\AuditLogService;
 use App\Services\Verification\OwnershipChallengeChecker;
@@ -289,6 +291,8 @@ class ViewMonitor extends Page
                 fn (string $path): string => "https://{$pendingVerification->domain}{$path}",
                 OwnershipChallengeChecker::FILE_PATHS,
             ),
+            'probeLocations' => ProbeLocation::query()->where('is_enabled', true)->orderBy('id')->get(['id', 'name', 'region', 'health_status']),
+            'remoteConfirmable' => app(RemoteProbeClient::class)->supports($monitor),
             'responseTimeRanges' => self::RESPONSE_TIME_RANGES,
             'mtbfPeriodOptions' => self::MTBF_PERIOD_OPTIONS,
         ];

@@ -167,6 +167,9 @@
                         @if ($monitor->slow_alerted_at && $monitor->status === MonitorStatus::Up)
                             <p class="sv-md-sub" style="color:var(--sv-warning);font-weight:600;">🐢 Slow — {{ $monitor->last_response_time_ms }} ms, above your {{ $monitor->slow_threshold_ms }} ms limit</p>
                         @endif
+                        @if ($monitor->last_regional_note && $monitor->status === MonitorStatus::Up)
+                            <p class="sv-md-sub" style="color:var(--sv-warning);font-weight:600;">⚠ Regional: {{ $monitor->last_regional_note }}</p>
+                        @endif
                         <p class="sv-md-sub">
                             @if (in_array($monitor->status, [MonitorStatus::Up, MonitorStatus::Down], true))
                                 Currently {{ strtolower($monitor->status->label()) }} for
@@ -572,7 +575,22 @@
 
                 <div class="sv-md-card">
                     <h3 class="sv-md-title" style="margin-bottom:10px;">Regions</h3>
-                    <div class="sv-md-kv"><span>{{ \App\Services\Monitoring\MonitorCheckRunner::PROBE_LOCATION }}</span><span>Re-check confirms every failure</span></div>
+                    <div class="sv-md-kv"><span>{{ \App\Services\Monitoring\MonitorCheckRunner::PROBE_LOCATION }}</span><span>Checks every interval</span></div>
+                    @foreach ($probeLocations as $location)
+                        <div class="sv-md-kv">
+                            <span>{{ $location->name }}</span>
+                            <span style="color:{{ $location->health_status === \App\Models\ProbeLocation::UNREACHABLE ? 'var(--sv-danger)' : 'var(--sv-text)' }};">
+                                {{ $location->health_status === \App\Models\ProbeLocation::UNREACHABLE ? 'Offline — skipped' : 'Confirms outages' }}
+                            </span>
+                        </div>
+                    @endforeach
+                    <p class="sv-md-sub">
+                        @if ($probeLocations->isNotEmpty() && $remoteConfirmable)
+                            A failure is re-checked from every location; the site is only marked down when most agree.
+                        @else
+                            Every failure is re-checked before it counts.
+                        @endif
+                    </p>
                 </div>
 
                 <div class="sv-md-card">

@@ -74,4 +74,21 @@ return [
         'daily_days' => (int) env('MONITORING_DAILY_RETENTION_DAYS', 730),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Probe agent mode
+    |--------------------------------------------------------------------------
+    |
+    | Set MONITORING_AGENT_MODE=true on a server in another region to make this
+    | application a probe agent: it only answers signed /probe-agent requests
+    | from the main server (Admin → Probe locations) with the same secret.
+    |
+    */
+
+    'agent' => [
+        'mode' => (bool) env('MONITORING_AGENT_MODE', false),
+        'secret' => env('MONITORING_AGENT_SECRET'),
+        'max_clock_skew_seconds' => 60,
+    ],
+
 ];

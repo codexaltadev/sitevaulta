@@ -2,6 +2,7 @@
 
 namespace App\Services\Monitoring;
 
+use App\Models\ProbeLocation;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Throwable;
@@ -18,9 +19,21 @@ class MonitoringIdentity
     }
 
     /**
+     * Every IP our checks can come from: this server and every enabled probe location.
+     *
      * @return list<string>
      */
     public function probeIps(): array
+    {
+        $locationIps = ProbeLocation::query()->where('is_enabled', true)->pluck('public_ips')->flatten()->filter()->all();
+
+        return array_values(array_unique([...$this->mainServerIps(), ...$locationIps]));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function mainServerIps(): array
     {
         $configured = (array) config('monitoring.probe_ips', []);
 

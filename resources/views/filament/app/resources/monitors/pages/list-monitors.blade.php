@@ -148,6 +148,9 @@
                                 @if ($monitor->slow_alerted_at && $monitor->status === MonitorStatus::Up)
                                     <span class="sv-mon-pill" style="color:var(--sv-warning);border-color:var(--sv-warning);" title="Slower than {{ $monitor->slow_threshold_ms }} ms since {{ $monitor->slow_alerted_at->diffForHumans() }}">🐢 SLOW {{ $monitor->last_response_time_ms }}ms</span>
                                 @endif
+                                @if ($monitor->last_regional_note && $monitor->status === MonitorStatus::Up)
+                                    <span class="sv-mon-pill" style="color:var(--sv-warning);border-color:var(--sv-warning);" title="{{ $monitor->last_regional_note }}">⚠ REGIONAL</span>
+                                @endif
                                 <span @class(['is-down' => $monitor->status === MonitorStatus::Down])>{{ ListMonitors::statusDurationLabel($monitor) }}</span>
                                 @if ($monitor->status === MonitorStatus::Down && $monitor->last_error)
                                     <span> | {{ $monitor->last_error }}</span>

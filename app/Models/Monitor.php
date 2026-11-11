@@ -62,6 +62,7 @@ class Monitor extends Model
         'last_response_time_ms',
         'last_http_status_code',
         'last_error',
+        'last_regional_note',
         'last_checked_at',
         'last_status_changed_at',
     ];

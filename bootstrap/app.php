@@ -22,6 +22,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/*',
             'billing/checkout/*',
             'heartbeat/*',
+            // Server-to-server, authenticated by an HMAC signature instead of a session.
+            'probe-agent/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

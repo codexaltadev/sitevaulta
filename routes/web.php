@@ -4,6 +4,7 @@ use App\Http\Controllers\BillingCheckoutController;
 use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\GoogleDriveOAuthController;
 use App\Http\Controllers\HeartbeatController;
+use App\Http\Controllers\ProbeAgentController;
 use App\Http\Controllers\StatusPageController;
 use App\Http\Controllers\Webhooks\PaymentWebhookController;
 use App\Http\Controllers\WebsiteClientReportController;
@@ -228,6 +229,15 @@ Route::get('/status/unsubscribe/{token}', [StatusPageController::class, 'unsubsc
     ->where('token', '[A-Za-z0-9]{48}')
     ->middleware('throttle:20,1')
     ->name('status-pages.unsubscribe');
+
+// Probe agent endpoints (only answer with MONITORING_AGENT_MODE=true and a valid signature).
+Route::post('/probe-agent/health', [ProbeAgentController::class, 'health'])
+    ->middleware('throttle:120,1')
+    ->name('probe-agent.health');
+
+Route::post('/probe-agent/check', [ProbeAgentController::class, 'check'])
+    ->middleware('throttle:600,1')
+    ->name('probe-agent.check');
 
 // For on-demand TLS (e.g. Caddy "ask"): 200 only for the custom domain of a published status page.
 Route::get('/status-domain-check', fn (Request $request) => StatusPage::query()
