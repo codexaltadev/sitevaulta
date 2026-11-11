@@ -9,6 +9,7 @@ use App\Models\ProbeLocation;
 use App\Models\User;
 use App\Services\Monitoring\MonitorCheckRunner;
 use App\Services\Monitoring\ProbeSignature;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -148,6 +149,33 @@ class MultiLocationCheckTest extends TestCase
         $this->assertSame(ProbeLocation::UNREACHABLE, $frankfurt->health_status);
         $this->assertStringContainsString('secret on the agent does not match', $frankfurt->last_error);
         $this->assertSame(['Probe location Frankfurt is not answering'], $admin->notifications()->pluck('data')->pluck('title')->all());
+    }
+
+    public function test_an_agent_server_exposes_only_its_probe_endpoints_and_needs_no_database(): void
+    {
+        config(['monitoring.agent.mode' => true, 'monitoring.agent.secret' => 'agent-secret']);
+
+        $this->get('/')->assertNotFound();
+        $this->get('/app/login')->assertNotFound();
+        $this->get('/status/anything')->assertNotFound();
+
+        $body = json_encode(['ping' => true]);
+        $this->call('POST', '/probe-agent/health', [], [], [], $this->transformHeadersToServerVars([...ProbeSignature::headers('agent-secret', $body), 'Content-Type' => 'application/json', 'Accept' => 'application/json']), $body)
+            ->assertOk()
+            ->assertJson(['ok' => true]);
+
+        $this->assertSame('array', config('session.driver'));
+        $this->assertSame('file', config('cache.default'));
+    }
+
+    public function test_every_scheduled_task_runs_on_one_server_only(): void
+    {
+        $events = app(Schedule::class)->events();
+
+        $this->assertNotEmpty($events);
+        foreach ($events as $event) {
+            $this->assertTrue($event->onOneServer, "{$event->command} must run on one server only.");
+        }
     }
 
     public function test_admins_manage_locations_and_their_ips_are_published(): void

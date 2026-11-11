@@ -8,6 +8,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// The scheduler may run on several servers (web + worker servers): every task still runs only once,
+// guarded by a lock in the shared cache (database or Redis).
+Schedule::alwaysOnOneServer();
+
 Schedule::command('sitevaulta:dispatch-scheduled-backups')->everyMinute()->withoutOverlapping();
 Schedule::command('sitevaulta:check-websites-uptime')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('sitevaulta:check-monitors')->everyMinute()->withoutOverlapping(10);

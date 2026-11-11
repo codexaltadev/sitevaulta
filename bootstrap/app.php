@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\RestrictAgentToProbeEndpoints;
 use App\Http\Middleware\ServeStatusPageOnCustomDomain;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -16,6 +17,8 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Before routing: status pages on their customers' own domains (status.client.com).
         $middleware->prepend(ServeStatusPageOnCustomDomain::class);
+        // First of all: a probe agent server exposes only its signed endpoints and needs no database.
+        $middleware->prepend(RestrictAgentToProbeEndpoints::class);
 
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',

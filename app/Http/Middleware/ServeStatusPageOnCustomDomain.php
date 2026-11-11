@@ -31,7 +31,8 @@ class ServeStatusPageOnCustomDomain
     {
         $host = mb_strtolower($request->getHost());
 
-        if ($host === mb_strtolower((string) parse_url((string) config('app.url'), PHP_URL_HOST))) {
+        // A probe agent has no status pages (and no database to look them up in).
+        if (config('monitoring.agent.mode') || $host === mb_strtolower((string) parse_url((string) config('app.url'), PHP_URL_HOST))) {
             return $next($request);
         }
 
