@@ -245,7 +245,7 @@ class MonitorCheckRunnerTest extends TestCase
         $paused = Monitor::factory()->paused()->create(['url' => 'https://paused.test/']);
 
         $this->artisan('sitevaulta:check-monitors')
-            ->expectsOutput('Checked 1 due monitors | Down: 0')
+            ->expectsOutput('Queued 1 due monitors')
             ->assertSuccessful();
 
         $this->assertSame(1, $due->checks()->count());

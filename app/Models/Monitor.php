@@ -102,6 +102,8 @@ class Monitor extends Model
             'last_response_time_ms' => 'integer',
             'last_http_status_code' => 'integer',
             'last_checked_at' => 'datetime',
+            'next_check_at' => 'datetime',
+            'first_checked_at' => 'datetime',
             'last_status_changed_at' => 'datetime',
             'expires_at' => 'datetime',
             'manual_expires_at' => 'date',
@@ -150,6 +152,13 @@ class Monitor extends Model
                 $monitor->last_probe_method = null;
                 $monitor->last_checked_at = null;
                 $monitor->dns_baseline = null;
+            }
+
+            // The scheduler only looks at monitors whose next_check_at has passed (null = due now).
+            if ($monitor->isDirty(['last_checked_at', 'interval_seconds', 'type'])) {
+                $monitor->next_check_at = $monitor->last_checked_at?->copy()->addSeconds(
+                    $monitor->type === MonitorType::Heartbeat ? 60 : max(30, (int) $monitor->interval_seconds),
+                );
             }
         });
     }

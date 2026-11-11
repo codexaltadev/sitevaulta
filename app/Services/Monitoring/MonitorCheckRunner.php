@@ -82,6 +82,7 @@ class MonitorCheckRunner
                 'monitor_id' => $monitor->id,
                 'error' => $finalProbe['error'],
             ]);
+            $monitor->forceFill(['next_check_at' => $now])->saveQuietly();
 
             return new MonitorCheck([
                 'monitor_id' => $monitor->id,

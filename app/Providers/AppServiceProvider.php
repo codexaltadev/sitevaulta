@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Models\User;
 use App\Services\Settings\SystemSettingsService;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
@@ -26,5 +27,11 @@ class AppServiceProvider extends ServiceProvider
         });
 
         SystemSettingsService::injectRuntimeConfig();
+
+        // `composer run dev` also runs the scheduler and the uptime-check worker (production uses Supervisor).
+        if ($this->app->runningInConsole() && $this->app->isLocal()) {
+            DevCommands::artisan('schedule:work', 'scheduler');
+            DevCommands::artisan('queue:listen --queue='.config('monitoring.queue', 'monitoring').' --tries=1 --timeout=0', 'monitors');
+        }
     }
 }

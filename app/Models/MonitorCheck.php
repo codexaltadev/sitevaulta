@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\MonitorStatus;
+use App\Services\Monitoring\MonitorStatsRecorder;
 use Database\Factories\MonitorCheckFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -33,6 +34,12 @@ class MonitorCheck extends Model
             'response_time_ms' => 'integer',
             'checked_at' => 'datetime',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Every stored check updates the hourly/daily totals that the uptime pages read.
+        static::created(fn (self $check) => app(MonitorStatsRecorder::class)->recordCheck($check));
     }
 
     public function monitor(): BelongsTo

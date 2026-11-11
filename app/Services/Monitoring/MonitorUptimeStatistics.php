@@ -5,7 +5,6 @@ namespace App\Services\Monitoring;
 use App\Enums\MonitorIncidentStatus;
 use App\Enums\MonitorStatus;
 use App\Models\Monitor;
-use App\Models\MonitorCheck;
 use App\Models\MonitorIncident;
 use App\Models\Workspace;
 use Carbon\CarbonImmutable;
@@ -13,8 +12,9 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Aggregates the monitor_checks time series into the numbers shown on the monitors list:
- * per-monitor hourly bars + 24h uptime %, and the workspace "Current status" / "Last 24 hours" rail.
+ * The numbers shown on the monitors list, detail page and status pages: hourly bars + 24h uptime %,
+ * daily bars, period summaries and response-time series. Uptime counts come from the hourly/daily
+ * stats tables (see MonitorStatsRecorder); only the 1h/24h response chart reads raw checks.
  */
 class MonitorUptimeStatistics
 {
@@ -43,21 +43,16 @@ class MonitorUptimeStatistics
             return $results;
         }
 
-        $bucketExpression = $this->hourBucketExpression();
-
-        $rows = MonitorCheck::query()
+        $rows = DB::table('monitor_hourly_stats')
             ->whereIn('monitor_id', $monitorIds)
-            ->where('checked_at', '>=', $this->windowStart())
-            ->selectRaw("monitor_id, {$bucketExpression} as hour_bucket, count(*) as total_checks, sum(case when status = ? then 1 else 0 end) as down_checks", [MonitorStatus::Down->value])
-            ->groupBy('monitor_id', 'hour_bucket')
-            ->toBase()
-            ->get();
+            ->where('period_start', '>=', $this->windowStart())
+            ->get(['monitor_id', 'period_start', 'total_checks', 'down_checks']);
 
         $totals = [];
 
         foreach ($rows as $row) {
             $monitorId = (int) $row->monitor_id;
-            $position = $hourKeys[$row->hour_bucket] ?? null;
+            $position = $hourKeys[CarbonImmutable::parse($row->period_start, 'UTC')->format('Y-m-d H')] ?? null;
 
             if ($position !== null) {
                 $results[$monitorId]['bars'][$position] = (int) $row->down_checks > 0 ? 'down' : 'up';
@@ -177,19 +172,15 @@ class MonitorUptimeStatistics
             return $results;
         }
 
-        $dayExpression = match (DB::connection()->getDriverName()) {
-            'sqlite' => "strftime('%Y-%m-%d', checked_at)",
-            'pgsql' => "to_char(checked_at, 'YYYY-MM-DD')",
-            default => "DATE_FORMAT(checked_at, '%Y-%m-%d')",
-        };
-
-        $rows = MonitorCheck::query()
+        $rows = DB::table('monitor_daily_stats')
             ->whereIn('monitor_id', $monitorIds)
-            ->where('checked_at', '>=', $firstDay)
-            ->selectRaw("monitor_id, {$dayExpression} as day_bucket, count(*) as total_checks, sum(case when status = ? then 1 else 0 end) as down_checks", [MonitorStatus::Down->value])
-            ->groupBy('monitor_id', 'day_bucket')
-            ->toBase()
-            ->get()
+            ->where('period_start', '>=', $firstDay->toDateString())
+            ->get(['monitor_id', 'period_start', 'total_checks', 'down_checks'])
+            ->map(function (object $row): object {
+                $row->day_bucket = substr((string) $row->period_start, 0, 10);
+
+                return $row;
+            })
             ->groupBy('monitor_id');
 
         foreach ($monitorIds as $monitorId) {
@@ -244,11 +235,10 @@ class MonitorUptimeStatistics
         $windowStart = $this->windowStart();
         $now = CarbonImmutable::now('UTC');
 
-        $checkTotals = MonitorCheck::query()
+        $checkTotals = DB::table('monitor_hourly_stats')
             ->whereIn('monitor_id', $workspace->monitors()->select('id'))
-            ->where('checked_at', '>=', $windowStart)
-            ->selectRaw('count(*) as total_checks, sum(case when status = ? then 1 else 0 end) as down_checks', [MonitorStatus::Down->value])
-            ->toBase()
+            ->where('period_start', '>=', $windowStart)
+            ->selectRaw('sum(total_checks) as total_checks, sum(down_checks) as down_checks')
             ->first();
 
         $totalChecks = (int) ($checkTotals->total_checks ?? 0);
@@ -294,10 +284,13 @@ class MonitorUptimeStatistics
         $now = CarbonImmutable::now('UTC');
         $periodStart = $now->subDays($days);
 
-        $checkTotals = $monitor->checks()
-            ->where('checked_at', '>=', $periodStart)
-            ->selectRaw('count(*) as total_checks, sum(case when status = ? then 1 else 0 end) as down_checks', [MonitorStatus::Down->value])
-            ->toBase()
+        // Hourly totals while they are kept; whole days beyond that (e.g. the 365-day figure).
+        $useHourly = $days <= (int) config('monitoring.retention.hourly_days', 90);
+
+        $checkTotals = DB::table($useHourly ? 'monitor_hourly_stats' : 'monitor_daily_stats')
+            ->where('monitor_id', $monitor->id)
+            ->where('period_start', '>=', $useHourly ? $periodStart->startOfHour() : $periodStart->toDateString())
+            ->selectRaw('sum(total_checks) as total_checks, sum(down_checks) as down_checks')
             ->first();
 
         $totalChecks = (int) ($checkTotals->total_checks ?? 0);
@@ -334,17 +327,15 @@ class MonitorUptimeStatistics
         };
 
         if ($range === '7d') {
-            $bucketExpression = $this->hourBucketExpression();
-            $points = $monitor->checks()
-                ->where('checked_at', '>=', $rangeStart)
-                ->selectRaw("{$bucketExpression} as hour_bucket, avg(response_time_ms) as average_ms")
-                ->groupBy('hour_bucket')
-                ->orderBy('hour_bucket')
-                ->toBase()
-                ->get()
+            // Hourly averages of successful checks; an hour with only failures is a gap.
+            $points = DB::table('monitor_hourly_stats')
+                ->where('monitor_id', $monitor->id)
+                ->where('period_start', '>=', $rangeStart->startOfHour())
+                ->orderBy('period_start')
+                ->get(['period_start', 'response_time_sum', 'response_time_count'])
                 ->map(fn (object $row): array => [
-                    'at' => CarbonImmutable::createFromFormat('Y-m-d H', $row->hour_bucket, 'UTC')->startOfHour()->getTimestamp(),
-                    'ms' => $row->average_ms !== null ? (int) round((float) $row->average_ms) : null,
+                    'at' => CarbonImmutable::parse($row->period_start, 'UTC')->getTimestamp(),
+                    'ms' => (int) $row->response_time_count > 0 ? (int) round($row->response_time_sum / $row->response_time_count) : null,
                 ]);
         } else {
             $points = $monitor->checks()
@@ -429,14 +420,5 @@ class MonitorUptimeStatistics
         }
 
         return $keys;
-    }
-
-    private function hourBucketExpression(): string
-    {
-        return match (DB::connection()->getDriverName()) {
-            'sqlite' => "strftime('%Y-%m-%d %H', checked_at)",
-            'pgsql' => "to_char(checked_at, 'YYYY-MM-DD HH24')",
-            default => "DATE_FORMAT(checked_at, '%Y-%m-%d %H')",
-        };
     }
 }

@@ -504,7 +504,7 @@ class MonitorTypesTest extends TestCase
         $this->freezeTime();
         $monitor = Monitor::factory()->create(['type' => MonitorType::Heartbeat, 'url' => null, 'interval_seconds' => 3600]);
 
-        $this->artisan('sitevaulta:check-monitors')->expectsOutput('Checked 0 due monitors | Down: 0');
+        $this->artisan('sitevaulta:check-monitors')->expectsOutput('Queued 0 due monitors');
 
         $this->assertSame(MonitorStatus::Pending, $monitor->refresh()->status);
     }

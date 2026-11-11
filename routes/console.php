@@ -11,3 +11,4 @@ Artisan::command('inspire', function () {
 Schedule::command('sitevaulta:dispatch-scheduled-backups')->everyMinute()->withoutOverlapping();
 Schedule::command('sitevaulta:check-websites-uptime')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('sitevaulta:check-monitors')->everyMinute()->withoutOverlapping(10);
+Schedule::command('sitevaulta:prune-monitor-data')->dailyAt('03:15')->withoutOverlapping();

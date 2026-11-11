@@ -106,7 +106,7 @@ class MaintenanceWindowTest extends TestCase
         MaintenanceWindow::factory()->create(['workspace_id' => $this->workspace->id])->monitors()->attach($inMaintenance);
 
         $this->artisan('sitevaulta:check-monitors')
-            ->expectsOutput('Checked 1 due monitors | Down: 0')
+            ->expectsOutput('Queued 1 due monitors')
             ->assertSuccessful();
 
         $this->assertSame(0, $inMaintenance->checks()->count());

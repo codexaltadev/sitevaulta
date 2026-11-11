@@ -45,4 +45,33 @@ return [
 
     'control_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('MONITORING_CONTROL_HOSTS', 'google.com,cloudflare.com,amazon.com'))))),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Queue
+    |--------------------------------------------------------------------------
+    |
+    | Checks run as queued jobs on their own queue, so a long backup job never
+    | delays them. Run a worker with: php artisan queue:work --queue=monitoring
+    |
+    */
+
+    'queue' => env('MONITORING_QUEUE', 'monitoring'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Data retention (days)
+    |--------------------------------------------------------------------------
+    |
+    | Raw checks feed the 1h / 24h response chart and the incident details;
+    | hourly totals feed the 24h bars, 7/30-day uptime and the 7-day chart;
+    | daily totals feed the 365-day uptime and status page bars.
+    |
+    */
+
+    'retention' => [
+        'raw_days' => (int) env('MONITORING_RAW_RETENTION_DAYS', 30),
+        'hourly_days' => (int) env('MONITORING_HOURLY_RETENTION_DAYS', 90),
+        'daily_days' => (int) env('MONITORING_DAILY_RETENTION_DAYS', 730),
+    ],
+
 ];

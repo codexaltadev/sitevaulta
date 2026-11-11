@@ -259,8 +259,8 @@ class ViewMonitor extends Page
             'series' => $statistics->responseTimeSeries($monitor, $range),
             'ongoingIncident' => $monitor->incidents()->where('status', MonitorIncidentStatus::Ongoing)->latest('started_at')->first(),
             // When the monitor is younger than a period, the uptime % only covers the time since its first check.
-            'monitoringSince' => ($firstCheck = $monitor->checks()->min('checked_at')) !== null
-                ? CarbonImmutable::parse($firstCheck, 'UTC')
+            'monitoringSince' => $monitor->first_checked_at !== null
+                ? CarbonImmutable::instance($monitor->first_checked_at)->utc()
                 : null,
             'checksLast24Hours' => $monitor->checks()->where('checked_at', '>=', now()->utc()->subDay())->count(),
             'childChecks' => $monitor->children()->orderBy('type')->get(),
