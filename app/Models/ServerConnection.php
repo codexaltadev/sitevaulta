@@ -4,12 +4,17 @@ namespace App\Models;
 
 use App\Enums\DatabaseDriver;
 use App\Enums\FileProtocol;
+use Database\Factories\ServerConnectionFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ServerConnection extends Model
 {
+    /** @use HasFactory<ServerConnectionFactory> */
+    use HasFactory;
+
     protected $fillable = [
         'workspace_id',
         'website_id',
@@ -58,4 +63,3 @@ class ServerConnection extends Model
         return (bool) data_get($this->capabilities, 'inc_files', true);
     }
 }
-

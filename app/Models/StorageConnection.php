@@ -3,12 +3,17 @@
 namespace App\Models;
 
 use App\Enums\StorageDriver;
+use Database\Factories\StorageConnectionFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class StorageConnection extends Model
 {
+    /** @use HasFactory<StorageConnectionFactory> */
+    use HasFactory;
+
     protected $fillable = [
         'workspace_id',
         'name',
@@ -75,4 +80,3 @@ class StorageConnection extends Model
         return $this->hasMany(BackupArtifact::class);
     }
 }
-

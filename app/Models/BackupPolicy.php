@@ -6,6 +6,8 @@ use App\Enums\BackupScope;
 use App\Enums\BackupStrategy;
 use App\Enums\DownloadMode;
 use App\Enums\ScheduleFrequency;
+use Database\Factories\BackupPolicyFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -13,6 +15,9 @@ use Illuminate\Support\Str;
 
 class BackupPolicy extends Model
 {
+    /** @use HasFactory<BackupPolicyFactory> */
+    use HasFactory;
+
     protected $fillable = [
         'uuid',
         'workspace_id',
@@ -110,4 +115,3 @@ class BackupPolicy extends Model
         return $this->hasMany(BackupRun::class);
     }
 }
-

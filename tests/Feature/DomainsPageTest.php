@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\MonitorType;
+use App\Models\BackupRun;
 use App\Models\Monitor;
 use App\Models\User;
 use App\Models\VerifiedDomain;
@@ -70,6 +71,24 @@ class DomainsPageTest extends TestCase
         $this->assertSame(['api.example', 'draft.example', 'shop.example', 'docs.example'], array_column($rows, 'host'));
         $this->assertSame(['Verification token missing — 5 days left'], $rows[2]['issues']);
         $this->assertSame(['domains' => 4, 'verified' => 2, 'attention' => 3, 'down' => 1, 'backed_up' => 2], $overview->summary($rows));
+    }
+
+    public function test_a_failed_last_backup_needs_attention_until_a_newer_one_succeeds(): void
+    {
+        $run = BackupRun::factory()->failed()->create(['created_at' => now()->subHour()]);
+        $workspace = $run->workspace;
+        $host = VerifiedDomain::normalize($run->website->domain);
+
+        $this->assertSame($workspace->id, $run->backupPolicy->storageConnection->workspace_id, 'The factory keeps the whole chain in one workspace.');
+        $this->assertTrue($run->website->isVerified());
+
+        $row = collect(app(DomainOverview::class)->rows($workspace))->firstWhere('host', $host);
+        $this->assertSame(['Last backup failed'], $row['issues']);
+
+        BackupRun::factory()->create(['backup_policy_id' => $run->backup_policy_id]);
+
+        $row = collect(app(DomainOverview::class)->rows($workspace))->firstWhere('host', $host);
+        $this->assertSame([], $row['issues']);
     }
 
     public function test_page_lists_the_workspace_domains_with_search_and_attention_filter(): void

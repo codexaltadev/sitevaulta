@@ -7,8 +7,10 @@ use App\Enums\WebsiteVerificationStatus;
 use App\Services\Monitoring\VerifiedDomainSync;
 use App\Services\Monitoring\WebsiteMonitorSync;
 use Carbon\CarbonInterface;
+use Database\Factories\WebsiteFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -17,6 +19,9 @@ use Illuminate\Support\Str;
 
 class Website extends Model
 {
+    /** @use HasFactory<WebsiteFactory> */
+    use HasFactory;
+
     protected $fillable = [
         'uuid',
         'workspace_id',

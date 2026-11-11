@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\BackupRunStatus;
 use App\Enums\BackupScope;
+use Database\Factories\BackupRunFactory;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -11,6 +13,9 @@ use Illuminate\Support\Str;
 
 class BackupRun extends Model
 {
+    /** @use HasFactory<BackupRunFactory> */
+    use HasFactory;
+
     protected $fillable = [
         'uuid',
         'workspace_id',
@@ -119,7 +124,7 @@ class BackupRun extends Model
         $units = ['B', 'KB', 'MB', 'GB', 'TB'];
         $pow = min((int) floor(log($bytes, 1024)), count($units) - 1);
 
-        return round($bytes / (1024 ** $pow), 2) . ' ' . $units[$pow];
+        return round($bytes / (1024 ** $pow), 2).' '.$units[$pow];
     }
 
     public function progressPercent(): int
