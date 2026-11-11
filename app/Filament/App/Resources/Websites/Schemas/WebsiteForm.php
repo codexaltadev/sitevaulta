@@ -4,6 +4,7 @@ namespace App\Filament\App\Resources\Websites\Schemas;
 
 use App\Models\Website;
 use App\Models\Workspace;
+use App\Rules\UniqueWorkspaceTarget;
 use App\Services\Verification\DomainVerificationService;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
@@ -43,7 +44,13 @@ class WebsiteForm
                                             ->placeholder('https://example.com')
                                             ->url()
                                             ->required()
-                                            ->maxLength(255),
+                                            ->maxLength(255)
+                                            // Each domain / sub-domain only once per workspace (www. ignored).
+                                            ->rule(fn (?Website $record): UniqueWorkspaceTarget => new UniqueWorkspaceTarget(
+                                                Filament::getTenant() instanceof Workspace ? Filament::getTenant() : null,
+                                                UniqueWorkspaceTarget::WEBSITES,
+                                                $record?->id,
+                                            )),
 
                                         Select::make('environment')
                                             ->label('Environment')
@@ -165,8 +172,8 @@ class WebsiteForm
                                                 "<div style='font-size:15px;font-weight:800;color:var(--sv-primary);margin-bottom:8px;'>🔒 Mandatory Domain Ownership Gate</div>".
                                                 "<p style='color:var(--sv-text-dim);margin-bottom:10px;'>After saving this website, SiteVaulta will generate a unique cryptographic verification token. You can verify ownership using any 1 of these 3 methods:</p>".
                                                 "<ol style='padding-left:18px;color:var(--sv-text-soft);'>".
-                                                '<li><strong>DNS TXT Record (Cloudflare / Route53 / Namecheap):</strong> Add a TXT record for <code>_sitevaulta-verify.yourdomain.com</code>.</li>'.
-                                                '<li><strong>HTML Verification File:</strong> Upload a single text file to <code>/.well-known/sitevaulta-verify.txt</code>.</li>'.
+                                                '<li><strong>DNS TXT Record (Cloudflare / Route53 / Namecheap):</strong> Add a TXT record for <code>_sitevaulta-challenge.yourdomain.com</code>.</li>'.
+                                                '<li><strong>HTML Verification File:</strong> Upload <code>sitevaulta-verify.txt</code> to your web root (<code>/sitevaulta-verify.txt</code>) or to <code>/.well-known/sitevaulta-verify.txt</code>.</li>'.
                                                 '<li><strong>Homepage Meta Tag:</strong> Add the <code>&lt;meta name="sitevaulta-verification"&gt;</code> tag inside your homepage <code>&lt;head&gt;</code>.</li>'.
                                                 '</ol></div>'
                                             );
@@ -178,7 +185,7 @@ class WebsiteForm
                                             '<div style="%s">'
                                             .'<div style="font-size:15px;font-weight:800;color:var(--sv-primary);margin-bottom:10px;">Choose Any 1 Method Below to Verify</div>'
                                             .'<div style="margin-bottom:10px;"><strong>Method A (DNS TXT Record):</strong><code style="%s">Host: %s<br>Value: %s</code></div>'
-                                            .'<div style="margin-bottom:10px;"><strong>Method B (HTML File):</strong><code style="%s">URL: %s%s<br>Content: %s</code></div>'
+                                            .'<div style="margin-bottom:10px;"><strong>Method B (HTML File):</strong><code style="%s">URL: %s%s<br>or (web root, no .well-known folder): %s/sitevaulta-verify.txt<br>Content: %s</code></div>'
                                             .'<div><strong>Method C (Homepage Meta Tag):</strong><code style="%s">&lt;meta name="%s" content="%s"&gt;</code></div>'
                                             .'</div>',
                                             $boxStyle,
@@ -188,6 +195,7 @@ class WebsiteForm
                                             $codeStyle,
                                             e(rtrim($record->url, '/')),
                                             e($challenge->file_path),
+                                            e(rtrim($record->url, '/')),
                                             e($challenge->token),
                                             $codeStyle,
                                             e($challenge->meta_tag_name),

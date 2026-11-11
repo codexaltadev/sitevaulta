@@ -2,6 +2,8 @@
 
 namespace App\Filament\Admin\Resources\Plans\Schemas;
 
+use App\Enums\MonitorType;
+use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\KeyValue;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Textarea;
@@ -172,6 +174,35 @@ class PlanForm
                             ->numeric()
                             ->default(360)
                             ->required(),
+
+                        TextInput::make('max_monitors')
+                            ->label('Max Uptime Monitors')
+                            ->numeric()
+                            ->minValue(0)
+                            ->default(10)
+                            ->required(),
+
+                        TextInput::make('min_monitor_interval_seconds')
+                            ->label('Min Monitor Check Interval (Seconds)')
+                            ->numeric()
+                            ->minValue(60)
+                            ->default(300)
+                            ->required(),
+
+                        TextInput::make('max_status_pages')
+                            ->label('Max Status Pages (999 = Unlimited)')
+                            ->numeric()
+                            ->minValue(0)
+                            ->default(1)
+                            ->required(),
+
+                        CheckboxList::make('allowed_monitor_types')
+                            ->label('Allowed monitor types')
+                            ->helperText('Customers on this plan can only create these monitor types and extra checks; others show 🔒 and are rejected by the server. Leave everything unticked to allow every type.')
+                            ->options(MonitorType::options())
+                            ->bulkToggleable()
+                            ->columns(4)
+                            ->columnSpanFull(),
 
                         TextInput::make('max_retention_days')
                             ->label('Max Retention Window (Days)')

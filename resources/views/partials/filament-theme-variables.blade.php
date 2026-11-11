@@ -46,5 +46,13 @@
         --sv-highlight: #fde68a;
         --sv-danger: #f87171;
     }
+
+    /* Denser layout for long editors (monitor create/edit), closer to UptimeRobot's compact form. */
+    .sv-compact-form .fi-sc { gap: 0.875rem; }
+    .sv-compact-form .fi-section-header { padding-block: 0.625rem; }
+    .sv-compact-form .fi-section-content-ctn > .fi-section-content > * { padding: 1rem 1.25rem; }
+    .sv-compact-form .fi-section-header-description { margin-top: 0.125rem; }
+    .sv-compact-form .fi-fo-field-wrp-helper-text { margin-top: 0.25rem; }
+    .sv-compact-form .noUi-pips { font-size: 11px; }
 </style>
 

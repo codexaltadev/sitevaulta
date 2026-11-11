@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'webhooks/*',
             'api/*',
             'billing/checkout/*',
+            'heartbeat/*',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

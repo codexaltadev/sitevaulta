@@ -1,0 +1,103 @@
+<?php
+
+namespace App\Filament\App\Resources\VerifiedDomains\Tables;
+
+use App\Filament\App\Resources\Websites\WebsiteResource;
+use App\Models\VerifiedDomain;
+use App\Services\Monitoring\HostOwnershipVerifier;
+use App\Services\Security\AuditLogService;
+use App\Services\Verification\OwnershipChallengeChecker;
+use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Notifications\Notification;
+use Filament\Support\Icons\Heroicon;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Table;
+
+class VerifiedDomainsTable
+{
+    public static function configure(Table $table): Table
+    {
+        return $table
+            ->defaultSort('id', 'desc')
+            ->modifyQueryUsing(fn ($query) => $query->with('website:id,name'))
+            ->emptyStateHeading('No verified domains yet')
+            ->emptyStateDescription('Verify a domain you own to run port checks on it. Verified backup websites and connected servers count automatically.')
+            ->columns([
+                TextColumn::make('domain')
+                    ->weight('semibold')
+                    ->searchable(),
+                TextColumn::make('verified_at')
+                    ->label('Status')
+                    ->badge()
+                    ->state(fn (VerifiedDomain $record): string => $record->isVerified() ? 'Verified' : 'Pending')
+                    ->color(fn (string $state): string => $state === 'Verified' ? 'success' : 'warning')
+                    ->description(fn (VerifiedDomain $record): ?string => $record->isVerified()
+                        ? 'via '.$record->methodLabel().', '.$record->verified_at->diffForHumans()
+                        : $record->last_error),
+                TextColumn::make('source')
+                    ->label('Source')
+                    ->badge()
+                    ->state(fn (VerifiedDomain $record): string => $record->website_id !== null ? 'Backup website' : 'Added here')
+                    ->color(fn (string $state): string => $state === 'Backup website' ? 'info' : 'gray')
+                    ->description(fn (VerifiedDomain $record): ?string => $record->website?->name)
+                    ->url(fn (VerifiedDomain $record): ?string => $record->website_id !== null ? WebsiteResource::getUrl('edit', ['record' => $record->website_id]) : null),
+                TextColumn::make('last_attempted_at')
+                    ->label('Last attempt')
+                    ->since()
+                    ->placeholder('Never'),
+            ])
+            ->recordActions([
+                Action::make('instructions')
+                    ->label('How to verify')
+                    ->icon(Heroicon::OutlinedInformationCircle)
+                    ->color('gray')
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite())
+                    ->modalHeading(fn (VerifiedDomain $record): string => "Verify {$record->domain}")
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Close')
+                    ->schema([
+                        TextEntry::make('dns')
+                            ->label('Option 1 — DNS TXT record (recommended)')
+                            ->state(fn (VerifiedDomain $record): string => "Name: {$record->dnsRecordName()}   ·   Type: TXT   ·   Value: {$record->token}")
+                            ->copyable()
+                            ->copyableState(fn (VerifiedDomain $record): string => $record->token),
+                        TextEntry::make('file')
+                            ->label('Option 2 — verification file')
+                            ->state(fn (VerifiedDomain $record): string => "Upload sitevaulta-verify.txt containing {$record->token} to https://{$record->domain}".OwnershipChallengeChecker::ROOT_FILE_PATH." (web root) or https://{$record->domain}".VerifiedDomain::FILE_PATH)
+                            ->copyable()
+                            ->copyableState(fn (VerifiedDomain $record): string => $record->token),
+                        TextEntry::make('meta')
+                            ->label('Option 3 — HTML meta tag in the homepage <head>')
+                            ->state(fn (VerifiedDomain $record): string => $record->metaTag())
+                            ->helperText('"Verify now" tries all three options.')
+                            ->copyable(),
+                    ]),
+                Action::make('verify')
+                    ->label('Verify now')
+                    ->icon(Heroicon::OutlinedShieldCheck)
+                    ->color('success')
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite())
+                    ->action(function (VerifiedDomain $record): void {
+                        $verified = app(HostOwnershipVerifier::class)->verify($record);
+
+                        AuditLogService::log(
+                            event: $verified ? 'monitoring.domain.verified' : 'monitoring.domain.verification_failed',
+                            auditable: $record,
+                            metadata: ['domain' => $record->domain, 'method' => $record->verification_method],
+                            workspaceId: $record->workspace_id,
+                        );
+
+                        $notification = Notification::make()->title($verified ? "{$record->domain} is verified" : 'Verification failed');
+                        $verified
+                            ? $notification->success()->body('You can now run port checks on this domain.')
+                            : $notification->danger()->body($record->last_error.' DNS changes can take a few minutes to appear.');
+                        $notification->send();
+                    }),
+                // Managed from Backup Management: it disappears when the website loses verification or is deleted.
+                DeleteAction::make()
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite()),
+            ]);
+    }
+}

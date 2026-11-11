@@ -19,6 +19,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\Support\Enums\Width;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -44,6 +45,8 @@ class AppPanelProvider extends PanelProvider
             ->favicon(fn () => SystemSettingsService::get('general', 'favicon_url') ?: null)
             // Dark & Light mode: users can switch Light / Dark / System from the user menu.
             // Preference is stored in localStorage key `filament:theme:mode` (shared with public pages).
+            // Use the full width next to the sidebar instead of Filament's centred 7xl (1280px) column.
+            ->maxContentWidth(Width::Full)
             ->darkMode(true)
             ->themeSwitcher(true)
             ->defaultThemeMode(ThemeMode::System)

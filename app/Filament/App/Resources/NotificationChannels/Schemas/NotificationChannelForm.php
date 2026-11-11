@@ -85,8 +85,11 @@ class NotificationChannelForm
                                         'backup_failed' => 'Backup Failed',
                                         'anomaly_detected' => 'Backup Anomaly Detected (Size Drop / Spike)',
                                         'storage_low_space' => 'Storage Destination Low Free Space',
+                                        'monitor_down' => 'Uptime Monitor Down (Incident Opened)',
+                                        'monitor_up' => 'Uptime Monitor Recovered',
+                                        'monitor_test' => 'Uptime Monitor Test Notification',
                                     ])
-                                    ->default(['backup_failed', 'anomaly_detected', 'storage_low_space'])
+                                    ->default(['backup_failed', 'anomaly_detected', 'storage_low_space', 'monitor_down', 'monitor_up', 'monitor_test'])
                                     ->columns(2)
                                     ->columnSpanFull(),
 

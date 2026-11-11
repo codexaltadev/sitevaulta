@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Enums\VerificationMethod;
 use App\Enums\WebsiteVerificationStatus;
+use App\Services\Monitoring\VerifiedDomainSync;
+use App\Services\Monitoring\WebsiteMonitorSync;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -95,12 +97,30 @@ class Website extends Model
                 $website->domain = self::extractDomain($website->url);
             }
         });
+
+        static::created(function (self $website): void {
+            app(VerifiedDomainSync::class)->syncWebsite($website);
+            app(WebsiteMonitorSync::class)->ensureMonitorFor($website);
+        });
+
+        static::updated(function (self $website): void {
+            if ($website->wasChanged(['domain', 'verification_status'])) {
+                app(VerifiedDomainSync::class)->syncWebsite($website);
+            }
+
+            app(WebsiteMonitorSync::class)->syncFromWebsite($website);
+        });
+    }
+
+    public function monitors(): HasMany
+    {
+        return $this->hasMany(Monitor::class);
     }
 
     public static function extractDomain(string $url): string
     {
         if (! str_contains($url, '://')) {
-            $url = 'https://' . $url;
+            $url = 'https://'.$url;
         }
         $host = parse_url($url, PHP_URL_HOST) ?: $url;
 
@@ -142,4 +162,3 @@ class Website extends Model
         return $this->verification_status === WebsiteVerificationStatus::Verified;
     }
 }
-

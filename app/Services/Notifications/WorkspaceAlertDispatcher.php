@@ -57,7 +57,11 @@ class WorkspaceAlertDispatcher
             Log::warning("Database notification dispatch error for workspace [{$workspace->slug}]: ".$e->getMessage());
         }
     }
-    public static function dispatch(Workspace $workspace, string $eventCode, array $variables = []): void
+
+    /**
+     * @param  list<int>|null  $onlyChannelIds  limit delivery to these channels (always scoped to the workspace); null = every active channel
+     */
+    public static function dispatch(Workspace $workspace, string $eventCode, array $variables = [], ?array $onlyChannelIds = null): void
     {
         if (self::isQuietHoursMuted($workspace, $eventCode)) {
             return;
@@ -67,6 +71,7 @@ class WorkspaceAlertDispatcher
 
         $channels = $workspace->notificationChannels()
             ->where('is_active', true)
+            ->when($onlyChannelIds !== null, fn ($query) => $query->whereKey($onlyChannelIds))
             ->get();
 
         $template = EmailTemplate::where('code', $eventCode)
@@ -100,7 +105,7 @@ class WorkspaceAlertDispatcher
                         (string) ($config['email'] ?? ''),
                         $subject,
                         $htmlMessage,
-                        "Channel '{$channel->name}' ({$eventCode}) alert sent to " . ($config['email'] ?? '')
+                        "Channel '{$channel->name}' ({$eventCode}) alert sent to ".($config['email'] ?? '')
                     ),
                     NotificationChannelType::Slack, NotificationChannelType::Discord, NotificationChannelType::Webhook => self::sendWebhook($config['webhook_url'] ?? '', [
                         'text' => "*{$subject}*\n{$plainMessage}",
@@ -409,7 +414,7 @@ class WorkspaceAlertDispatcher
                 : "🟢 RECOVERED: {$website->name} ({$website->domain}) is Back Online!",
             body: $isDown
                 ? "Reason: {$reason}"
-                : "Website & Server responded HTTP ".($httpStatus ?: 200)." ({$responseTimeMs} ms).",
+                : 'Website & Server responded HTTP '.($httpStatus ?: 200)." ({$responseTimeMs} ms).",
             status: $isDown ? 'danger' : 'success'
         );
 

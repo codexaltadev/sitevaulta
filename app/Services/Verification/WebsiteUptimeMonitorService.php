@@ -4,11 +4,15 @@ namespace App\Services\Verification;
 
 use App\Enums\BackupRunStatus;
 use App\Enums\FileProtocol;
+use App\Enums\MonitorStatus;
 use App\Models\BackupRun;
+use App\Models\Monitor;
 use App\Models\ServerConnection;
 use App\Models\Website;
 use App\Services\Billing\EmailWalletService;
 use App\Services\Connectors\ServerConnectorManager;
+use App\Services\Monitoring\MonitorCheckRunner;
+use App\Services\Monitoring\NetworkProbe;
 use App\Services\Notifications\WorkspaceAlertDispatcher;
 use App\Services\Security\AuditLogService;
 use Carbon\Carbon;
@@ -29,6 +33,15 @@ class WebsiteUptimeMonitorService
         ?int $forceSimulateSslDaysRemaining = null
     ): array {
         $website->loadMissing(['workspace.owner', 'serverConnections']);
+
+        if ($forceSimulateOnline === null && $forceSimulateSslDaysRemaining === null) {
+            $linkedMonitor = $website->monitors()->where('status', '!=', MonitorStatus::Paused)->first();
+
+            if ($linkedMonitor !== null) {
+                return self::checkThroughLinkedMonitor($website, $linkedMonitor);
+            }
+        }
+
         $previousStatus = $website->uptime_status ?: 'unknown';
         $startTime = microtime(true);
 
@@ -182,30 +195,9 @@ class WebsiteUptimeMonitorService
         ]);
 
         $emailNotified = false;
-        $sslExpiryAlertSent = false;
 
         // 2C. Send Automatic SSL Certificate Expiry Reminder if expiring within threshold (e.g. <= 14 days)
-        $sslWarningThreshold = (int) ($website->ssl_expiry_warning_days ?: 14);
-        if ($sslDaysRemaining !== null
-            && $sslDaysRemaining <= $sslWarningThreshold
-            && ($website->notify_on_ssl_expiry ?? true)
-        ) {
-            $shouldNotifySsl = ($website->last_ssl_expiry_notified_at === null)
-                || $website->last_ssl_expiry_notified_at->diffInHours(now()->utc()) >= 24;
-
-            if ($shouldNotifySsl) {
-                $sslExpiryAlertSent = WorkspaceAlertDispatcher::sendWebsiteSslExpiryAlertEmail(
-                    website: $website,
-                    daysRemaining: $sslDaysRemaining,
-                    issuer: (string) ($sslIssuer ?: 'Unknown CA'),
-                    expiresAtFormatted: $sslExpiresFormatted
-                );
-
-                if ($sslExpiryAlertSent) {
-                    $website->update(['last_ssl_expiry_notified_at' => now()->utc()]);
-                }
-            }
-        }
+        $sslExpiryAlertSent = self::sendSslExpiryAlertIfDue($website, $sslDaysRemaining, $sslIssuer, $sslExpiresFormatted);
 
         // 3. Notify Owner if Website or Server went DOWN
         if (! $isOverallOnline && ($website->uptime_monitoring_enabled ?? true)) {
@@ -298,6 +290,183 @@ class WebsiteUptimeMonitorService
             'email_notified' => $emailNotified,
             'alert_sent' => $emailNotified,
         ];
+    }
+
+    /**
+     * Website uptime is owned by its linked standalone Monitor: run that monitor (which records the check,
+     * opens/resolves the incident and sends the down/recovery alerts), then refresh server + SSL health.
+     *
+     * @return array{is_online: bool, uptime_status: string, http_status: int|null, response_time_ms: int, server_status: string, ssl_status: string, ssl_days_remaining: int|null, ssl_expiry_alert_sent: bool, message: string, email_notified: bool, alert_sent: bool}
+     */
+    protected static function checkThroughLinkedMonitor(Website $website, Monitor $monitor): array
+    {
+        $check = app(MonitorCheckRunner::class)->run($monitor);
+        $website->refresh();
+
+        $health = self::refreshServerAndSslHealth($website);
+        $httpOnline = $check->status === MonitorStatus::Up;
+        $isOnline = $httpOnline && $health['server_status'] !== 'down';
+        $reason = collect([$httpOnline ? null : $monitor->refresh()->last_error, $health['server_reason']])->filter()->implode(' | ');
+
+        return [
+            'is_online' => $isOnline,
+            'uptime_status' => (string) $website->uptime_status,
+            'http_status' => $check->http_status_code,
+            'response_time_ms' => (int) $check->response_time_ms,
+            'server_status' => $health['server_status'],
+            'ssl_status' => $health['ssl_status'],
+            'ssl_days_remaining' => $health['ssl_days_remaining'],
+            'ssl_expiry_alert_sent' => $health['ssl_expiry_alert_sent'],
+            'message' => $isOnline
+                ? "🟢 Online — HTTP {$check->http_status_code} ({$check->response_time_ms} ms) | Server: ".strtoupper($health['server_status'])
+                : '🔴 Down — '.($reason ?: 'Unreachable'),
+            'email_notified' => $health['server_alert_sent'],
+            'alert_sent' => $health['server_alert_sent'],
+        ];
+    }
+
+    /**
+     * Server-connection reachability + SSL certificate telemetry for a website whose HTTP uptime is
+     * handled by its linked Monitor. Alerts the owner when the server goes down or recovers, and sends
+     * the SSL expiry reminder. Never touches the website's HTTP uptime columns.
+     *
+     * @return array{server_status: string, server_reason: string|null, server_alert_sent: bool, ssl_status: string, ssl_days_remaining: int|null, ssl_expiry_alert_sent: bool}
+     */
+    public static function refreshServerAndSslHealth(Website $website): array
+    {
+        $website->loadMissing(['workspace.owner', 'serverConnections']);
+        $cleanHost = self::extractCleanHostname($website);
+        $httpOnline = $website->uptime_status === 'online';
+        $previousServerStatus = $website->server_live_status ?: 'unknown';
+
+        $serverStatus = 'not_connected';
+        $serverReasons = [];
+
+        if ($website->serverConnections->isNotEmpty()) {
+            $serverAllOnline = true;
+
+            foreach ($website->serverConnections as $conn) {
+                /** @var ServerConnection $conn */
+                $endpoint = self::resolveServerEndpoint($conn, $website);
+
+                if ($endpoint['host'] === '' || self::isReservedOrFakeHost($endpoint['host'])) {
+                    $serverAllOnline = false;
+                    $conn->update(['health_status' => 'unreachable', 'last_tested_at' => now()->utc()]);
+                    $serverReasons[] = "Server [{$conn->name} ({$endpoint['host']})] is unreachable (Fake/Test IP or offline host)";
+
+                    continue;
+                }
+
+                if ((($conn->file_credentials ?? [])['simulation_mode'] ?? false) === true) {
+                    if (! $httpOnline) {
+                        $serverAllOnline = false;
+                        $serverReasons[] = "Server [{$conn->name}] unreachable";
+                    }
+
+                    continue;
+                }
+
+                $reachability = self::probeServerConnectionLive($conn, $endpoint['host'], $endpoint['port'], $httpOnline, $cleanHost);
+
+                if (! $reachability['online']) {
+                    $serverAllOnline = false;
+                    $serverReasons[] = "Server [{$conn->name} ({$endpoint['display']})] unreachable: {$reachability['reason']}";
+                }
+            }
+
+            $serverStatus = $serverAllOnline ? 'online' : 'down';
+        }
+
+        $sslStatus = $website->ssl_status ?: 'none';
+        $sslIssuer = $website->ssl_issuer;
+        $sslExpiresAt = $website->ssl_expires_at;
+        $sslDaysRemaining = $website->ssl_days_remaining;
+        $sslExpiresFormatted = $sslExpiresAt?->format('M d, Y');
+
+        if ($httpOnline && ! self::isReservedOrFakeHost($cleanHost)) {
+            $sslData = self::inspectSslCertificate($cleanHost);
+
+            if ($sslData['days_remaining'] !== null) {
+                $sslDaysRemaining = (int) $sslData['days_remaining'];
+                $sslIssuer = $sslData['issuer'] ?: 'Unknown CA';
+                $sslExpiresFormatted = $sslData['expires_at'];
+                $sslExpiresAt = $sslData['expires_at'] ? Carbon::parse($sslData['expires_at']) : null;
+                $sslStatus = $sslDaysRemaining <= 0
+                    ? 'expired'
+                    : ($sslDaysRemaining <= ($website->ssl_expiry_warning_days ?: 14) ? 'expiring_soon' : 'valid');
+            }
+        }
+
+        $website->update([
+            'server_live_status' => $serverStatus,
+            'ssl_status' => $sslStatus,
+            'ssl_issuer' => $sslIssuer,
+            'ssl_expires_at' => $sslExpiresAt,
+            'ssl_days_remaining' => $sslDaysRemaining,
+        ]);
+
+        $serverReason = $serverReasons === [] ? null : implode(' | ', array_unique($serverReasons));
+        $serverAlertSent = false;
+
+        if ($website->uptime_monitoring_enabled ?? true) {
+            if ($serverStatus === 'down' && $previousServerStatus !== 'down') {
+                $serverAlertSent = WorkspaceAlertDispatcher::sendWebsiteUptimeAlertEmail(
+                    website: $website,
+                    isDown: true,
+                    reason: (string) $serverReason,
+                );
+            } elseif ($serverStatus === 'online' && $previousServerStatus === 'down') {
+                $serverAlertSent = WorkspaceAlertDispatcher::sendWebsiteUptimeAlertEmail(
+                    website: $website,
+                    isDown: false,
+                    reason: 'Connected server recovered',
+                );
+            }
+        }
+
+        return [
+            'server_status' => $serverStatus,
+            'server_reason' => $serverReason,
+            'server_alert_sent' => $serverAlertSent,
+            'ssl_status' => $sslStatus,
+            'ssl_days_remaining' => $sslDaysRemaining,
+            'ssl_expiry_alert_sent' => self::sendSslExpiryAlertIfDue($website, $sslDaysRemaining, $sslIssuer, $sslExpiresFormatted),
+        ];
+    }
+
+    /**
+     * Sends the SSL expiry reminder at most once per 24 hours while the certificate is inside the warning window.
+     */
+    protected static function sendSslExpiryAlertIfDue(Website $website, ?int $sslDaysRemaining, ?string $sslIssuer, ?string $sslExpiresFormatted): bool
+    {
+        $sslWarningThreshold = (int) ($website->ssl_expiry_warning_days ?: 14);
+
+        if ($sslDaysRemaining === null
+            || $sslDaysRemaining > $sslWarningThreshold
+            || ! ($website->notify_on_ssl_expiry ?? true)
+        ) {
+            return false;
+        }
+
+        $shouldNotifySsl = ($website->last_ssl_expiry_notified_at === null)
+            || $website->last_ssl_expiry_notified_at->diffInHours(now()->utc()) >= 24;
+
+        if (! $shouldNotifySsl) {
+            return false;
+        }
+
+        $sslExpiryAlertSent = WorkspaceAlertDispatcher::sendWebsiteSslExpiryAlertEmail(
+            website: $website,
+            daysRemaining: $sslDaysRemaining,
+            issuer: (string) ($sslIssuer ?: 'Unknown CA'),
+            expiresAtFormatted: $sslExpiresFormatted
+        );
+
+        if ($sslExpiryAlertSent) {
+            $website->update(['last_ssl_expiry_notified_at' => now()->utc()]);
+        }
+
+        return $sslExpiryAlertSent;
     }
 
     /**
@@ -573,26 +742,9 @@ class WebsiteUptimeMonitorService
     protected static function inspectSslCertificate(string $host): array
     {
         try {
-            $context = stream_context_create([
-                'ssl' => [
-                    'capture_peer_cert' => true,
-                    'verify_peer' => false,
-                    'verify_peer_name' => false,
-                    'SNI_enabled' => true,
-                    'peer_name' => $host,
-                ],
-            ]);
+            $certificate = app(NetworkProbe::class)->sslCertificate($host);
 
-            $client = @stream_socket_client(
-                "ssl://{$host}:443",
-                $errno,
-                $errstr,
-                4,
-                STREAM_CLIENT_CONNECT,
-                $context
-            );
-
-            if (! $client) {
+            if ($certificate['expires_at'] === null) {
                 return [
                     'valid' => false,
                     'issuer' => 'Unavailable',
@@ -600,47 +752,14 @@ class WebsiteUptimeMonitorService
                     'expires_at' => null,
                     'days_remaining' => null,
                     'protocol' => 'Port 443 Closed',
-                    'status_label' => '❌ SSL Handshake Failed',
+                    'status_label' => '❌ '.$certificate['error'],
                     'badge_color' => '#ef4444',
                 ];
             }
 
-            $params = stream_context_get_params($client);
-            fclose($client);
-
-            $certResource = $params['options']['ssl']['peer_certificate'] ?? null;
-            if (! $certResource) {
-                return [
-                    'valid' => false,
-                    'issuer' => 'None',
-                    'subject' => $host,
-                    'expires_at' => null,
-                    'days_remaining' => null,
-                    'protocol' => 'TLS',
-                    'status_label' => '❌ No Peer Certificate',
-                    'badge_color' => '#ef4444',
-                ];
-            }
-
-            $cert = openssl_x509_parse($certResource);
-            $validToTimestamp = $cert['validTo_time_t'] ?? null;
-            $issuerOrg = $cert['issuer']['O'] ?? ($cert['issuer']['CN'] ?? 'Unknown CA');
-            $subjectCn = $cert['subject']['CN'] ?? $host;
-
-            if (! $validToTimestamp) {
-                return [
-                    'valid' => false,
-                    'issuer' => (string) $issuerOrg,
-                    'subject' => (string) $subjectCn,
-                    'expires_at' => null,
-                    'days_remaining' => null,
-                    'protocol' => 'TLS',
-                    'status_label' => '⚠️ Unparseable Expiry',
-                    'badge_color' => '#f59e0b',
-                ];
-            }
-
-            $expiresAt = Carbon::createFromTimestampUTC($validToTimestamp);
+            $issuerOrg = $certificate['issuer'];
+            $subjectCn = $certificate['subject'];
+            $expiresAt = $certificate['expires_at'];
             $daysRemaining = (int) round(now()->utc()->diffInDays($expiresAt, false));
             $isValid = $daysRemaining > 0;
 

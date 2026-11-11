@@ -36,7 +36,7 @@
                     <p style="color: var(--muted);">Before any server connection or scheduled backup can execute, verify domain ownership using one of three cryptographic methods:</p>
                     <ul style="line-height: 1.8;">
                         <li><strong>DNS TXT Record:</strong> Add <code>_sitevaulta-verify.yourdomain.com</code> with your unique token.</li>
-                        <li><strong>HTML Verification File:</strong> Upload <code>/.well-known/sitevaulta-verify.txt</code> to your web root.</li>
+                        <li><strong>HTML Verification File:</strong> Upload <code>sitevaulta-verify.txt</code> to your web root (<code>/sitevaulta-verify.txt</code>) or to <code>/.well-known/sitevaulta-verify.txt</code>.</li>
                         <li><strong>Homepage Meta Tag:</strong> Add <code>&lt;meta name="sitevaulta-verification" content="sv-verify-..."&gt;</code> inside <code>&lt;head&gt;</code>.</li>
                     </ul>
                 </div>

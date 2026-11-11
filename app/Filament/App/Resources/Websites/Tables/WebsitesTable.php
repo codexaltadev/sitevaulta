@@ -46,6 +46,15 @@ class WebsitesTable
                 TextColumn::make('verification_status')
                     ->label('Ownership Status')
                     ->badge()
+                    ->formatStateUsing(fn (WebsiteVerificationStatus $state): string => $state === WebsiteVerificationStatus::Verified ? 'Verified Owner' : $state->label())
+                    ->icon(fn (WebsiteVerificationStatus $state): Heroicon => match ($state) {
+                        WebsiteVerificationStatus::Verified => Heroicon::OutlinedShieldCheck,
+                        WebsiteVerificationStatus::Failed => Heroicon::OutlinedShieldExclamation,
+                        default => Heroicon::OutlinedClock,
+                    })
+                    ->tooltip(fn (WebsiteVerificationStatus $state): string => $state === WebsiteVerificationStatus::Verified
+                        ? 'Ownership proven — this domain also counts as verified for uptime monitoring (port checks allowed).'
+                        : 'Verify ownership to unlock backups and port checks for this domain.')
                     ->color(fn (WebsiteVerificationStatus $state): string => $state->color()),
 
                 TextColumn::make('uptime_status')
@@ -212,7 +221,7 @@ class WebsitesTable
                                         '<div style="padding:14px;border-radius:8px;background:var(--sv-bg);color:var(--sv-text);border:1px solid var(--sv-border);line-height:1.7;">'
                                         .'<div><strong style="color:var(--sv-primary);">Token:</strong> <code>%s</code></div>'
                                         .'<div><strong style="color:var(--sv-primary);">DNS TXT Host:</strong> <code>%s</code></div>'
-                                        .'<div><strong style="color:var(--sv-primary);">File Path:</strong> <code>%s</code></div>'
+                                        .'<div><strong style="color:var(--sv-primary);">File Path:</strong> <code>%s</code> or <code>/sitevaulta-verify.txt</code> (web root)</div>'
                                         .'<div><strong style="color:var(--sv-primary);">Meta Tag:</strong> <code>&lt;meta name="%s" content="%s"&gt;</code></div>'
                                         .'</div>',
                                         e($challenge->token),

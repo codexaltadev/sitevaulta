@@ -8,6 +8,10 @@ use App\Enums\BackupStrategy;
 use App\Enums\DatabaseDriver;
 use App\Enums\DownloadMode;
 use App\Enums\FileProtocol;
+use App\Enums\MaintenanceScheduleType;
+use App\Enums\MonitorIncidentStatus;
+use App\Enums\MonitorStatus;
+use App\Enums\MonitorType;
 use App\Enums\ScheduleFrequency;
 use App\Enums\StorageDriver;
 use App\Enums\VerificationMethod;
@@ -16,10 +20,15 @@ use App\Models\BackupArtifact;
 use App\Models\BackupChain;
 use App\Models\BackupPolicy;
 use App\Models\BackupRun;
+use App\Models\MaintenanceWindow;
+use App\Models\Monitor;
+use App\Models\MonitorCheck;
 use App\Models\ServerConnection;
+use App\Models\StatusPage;
 use App\Models\StorageConnection;
 use App\Models\Website;
 use App\Models\Workspace;
+use App\Services\Monitoring\MonitorCheckRunner;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -122,7 +131,7 @@ class DemoWorkspaceSeeder extends Seeder
                 'verification_status' => WebsiteVerificationStatus::Verified,
                 'verification_method' => VerificationMethod::DnsTxt,
                 'verified_at' => now()->subDays(28),
-                'webhook_secret' => 'sv_wh_live_' . Str::random(24),
+                'webhook_secret' => 'sv_wh_live_'.Str::random(24),
                 'known_files_size_bytes' => 420 * 1024 * 1024, // 420 MB
                 'known_db_size_bytes' => 75 * 1024 * 1024,   // 75 MB
                 'status' => 'active',
@@ -165,7 +174,7 @@ class DemoWorkspaceSeeder extends Seeder
                 'verification_status' => WebsiteVerificationStatus::Verified,
                 'verification_method' => VerificationMethod::HtmlFile,
                 'verified_at' => now()->subDays(14),
-                'webhook_secret' => 'sv_wh_live_' . Str::random(24),
+                'webhook_secret' => 'sv_wh_live_'.Str::random(24),
                 'known_files_size_bytes' => 180 * 1024 * 1024, // 180 MB
                 'known_db_size_bytes' => 160 * 1024 * 1024,  // 160 MB
                 'status' => 'active',
@@ -208,7 +217,7 @@ class DemoWorkspaceSeeder extends Seeder
                 'verification_status' => WebsiteVerificationStatus::Verified,
                 'verification_method' => VerificationMethod::MetaTag,
                 'verified_at' => now()->subDays(7),
-                'webhook_secret' => 'sv_wh_live_' . Str::random(24),
+                'webhook_secret' => 'sv_wh_live_'.Str::random(24),
                 'known_files_size_bytes' => 650 * 1024 * 1024, // 650 MB
                 'known_db_size_bytes' => 110 * 1024 * 1024,  // 110 MB
                 'status' => 'active',
@@ -357,7 +366,7 @@ class DemoWorkspaceSeeder extends Seeder
             [
                 'storage_connection_id' => $gdrive->id,
                 'artifact_type' => 'combined_zip',
-                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_' . $run1->id . '_full.enc.zip',
+                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_'.$run1->id.'_full.enc.zip',
                 'file_name' => 'shop-fashionbd_2026-10-26_base_full.enc.zip',
                 'size_bytes' => 260 * 1024 * 1024,
                 'sha256_checksum' => 'c83f982a1740b2e88a31e84712fc6572a91b48e30198f82163b782914cda9021',
@@ -397,7 +406,7 @@ class DemoWorkspaceSeeder extends Seeder
             [
                 'storage_connection_id' => $gdrive->id,
                 'artifact_type' => 'combined_zip',
-                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_' . $run2->id . '_inc1.enc.zip',
+                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_'.$run2->id.'_inc1.enc.zip',
                 'file_name' => 'shop-fashionbd_2026-10-27_delta_inc1.enc.zip',
                 'size_bytes' => 18 * 1024 * 1024,
                 'sha256_checksum' => 'a91b248e30198f82163b782914cda9021c83f982a1740b2e88a31e84712fc657',
@@ -437,7 +446,7 @@ class DemoWorkspaceSeeder extends Seeder
             [
                 'storage_connection_id' => $gdrive->id,
                 'artifact_type' => 'combined_zip',
-                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_' . $run3->id . '_inc2.enc.zip',
+                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_'.$run3->id.'_inc2.enc.zip',
                 'file_name' => 'shop-fashionbd_2026-10-28_delta_inc2.enc.zip',
                 'size_bytes' => 24 * 1024 * 1024,
                 'sha256_checksum' => 'e47c12fc6572a91b48e30198f82163b782914cda9021c83f982a1740b2e88a31',
@@ -477,7 +486,7 @@ class DemoWorkspaceSeeder extends Seeder
             [
                 'storage_connection_id' => $gdrive->id,
                 'artifact_type' => 'combined_zip',
-                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_' . $run4->id . '_inc3.enc.zip',
+                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/run_'.$run4->id.'_inc3.enc.zip',
                 'file_name' => 'shop-fashionbd_2026-10-29_delta_inc3.enc.zip',
                 'size_bytes' => 16 * 1024 * 1024,
                 'sha256_checksum' => '7f2d8914cda9021c83f982a1740b2e88a31e84712fc6572a91b48e30198f8216',
@@ -526,7 +535,7 @@ class DemoWorkspaceSeeder extends Seeder
             [
                 'storage_connection_id' => $s3->id,
                 'artifact_type' => 'db_dump_sql',
-                'remote_path' => 'daily-archives/api.travelmatrix.io/pg_dump_' . $run5->id . '.sql.gz.enc',
+                'remote_path' => 'daily-archives/api.travelmatrix.io/pg_dump_'.$run5->id.'.sql.gz.enc',
                 'file_name' => 'travelmatrix_pg_2026-10-29_snapshot.sql.gz.enc',
                 'size_bytes' => 45 * 1024 * 1024,
                 'sha256_checksum' => '3b89f82163b782914cda9021c83f982a1740b2e88a31e84712fc6572a91b48e3',
@@ -565,7 +574,7 @@ class DemoWorkspaceSeeder extends Seeder
             [
                 'storage_connection_id' => $gdrive->id,
                 'artifact_type' => 'db_dump_sql',
-                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/predeploy_' . $run6->id . '.sql.gz.enc',
+                'remote_path' => 'sitevaulta-backups/shop-fashionbd.com/predeploy_'.$run6->id.'.sql.gz.enc',
                 'file_name' => 'shop-fashionbd_predeploy_v2.4.1.sql.gz.enc',
                 'size_bytes' => 22 * 1024 * 1024,
                 'sha256_checksum' => '9a02d84712fc6572a91b48e30198f82163b782914cda9021c83f982a1740b2e8',
@@ -575,5 +584,160 @@ class DemoWorkspaceSeeder extends Seeder
                 'verified_at' => now()->subMinutes(54),
             ]
         );
+
+        $this->seedUptimeMonitors($workspace, $site1, $site2, $site3);
+    }
+
+    /**
+     * Seeds UptimeRobot-style monitors with 24 hours of 5-minute check history,
+     * one resolved incident and one ongoing DNS incident (with activity log).
+     */
+    private function seedUptimeMonitors(Workspace $workspace, Website $shop, Website $api, Website $crm): void
+    {
+        $now = now()->utc()->startOfMinute();
+
+        $definitions = [
+            ['name' => 'shop-fashionbd.com', 'website_id' => $shop->id, 'type' => MonitorType::Http, 'url' => 'https://shop-fashionbd.com/', 'status' => MonitorStatus::Up, 'base_ms' => 420],
+            ['name' => 'FashionBD checkout keyword', 'website_id' => null, 'type' => MonitorType::Keyword, 'url' => 'https://checkout.shop-fashionbd.com/', 'keyword' => 'Place order', 'status' => MonitorStatus::Up, 'base_ms' => 610],
+            ['name' => 'api.travelmatrix.io', 'website_id' => $api->id, 'type' => MonitorType::Http, 'url' => 'https://api.travelmatrix.io/', 'status' => MonitorStatus::Down, 'base_ms' => 180],
+            ['name' => 'crm.fintechcloud.net', 'website_id' => $crm->id, 'type' => MonitorType::Http, 'url' => 'https://crm.fintechcloud.net/', 'status' => MonitorStatus::Up, 'base_ms' => 260],
+            ['name' => 'TravelMatrix PostgreSQL', 'website_id' => null, 'type' => MonitorType::Port, 'url' => null, 'host' => 'db.travelmatrix.io', 'port' => 5432, 'status' => MonitorStatus::Paused, 'base_ms' => 35],
+            ['name' => 'shop-fashionbd.com SSL certificate', 'website_id' => null, 'parent_website_id' => $shop->id, 'type' => MonitorType::Ssl, 'url' => null, 'host' => 'shop-fashionbd.com', 'status' => MonitorStatus::Up, 'base_ms' => 140],
+            ['name' => 'travelmatrix.io MX records', 'website_id' => null, 'type' => MonitorType::Dns, 'url' => null, 'host' => 'travelmatrix.io', 'dns_record_type' => 'MX', 'status' => MonitorStatus::Up, 'base_ms' => 30],
+        ];
+
+        foreach ($definitions as $definition) {
+            $isDown = $definition['status'] === MonitorStatus::Down;
+
+            // Website-linked monitors are auto-created with the website, so match those by website_id.
+            $monitor = Monitor::updateOrCreate(
+                $definition['website_id'] !== null
+                    ? ['workspace_id' => $workspace->id, 'website_id' => $definition['website_id']]
+                    : ['workspace_id' => $workspace->id, 'name' => $definition['name']],
+                [
+                    'name' => $definition['name'],
+                    'website_id' => $definition['website_id'],
+                    // Same-host checks (e.g. SSL for the shop) are extra checks of the shop's main monitor.
+                    'parent_id' => isset($definition['parent_website_id'])
+                        ? Monitor::where('workspace_id', $workspace->id)->whereNull('parent_id')->where('website_id', $definition['parent_website_id'])->value('id')
+                        : null,
+                    'type' => $definition['type'],
+                    'url' => $definition['url'],
+                    'host' => $definition['host'] ?? null,
+                    'port' => $definition['port'] ?? null,
+                    'keyword' => $definition['keyword'] ?? null,
+                    'dns_record_type' => $definition['dns_record_type'] ?? null,
+                    'interval_seconds' => 300,
+                    'status' => $definition['status'],
+                    'consecutive_failures' => $isDown ? 8 : 0,
+                    'last_response_time_ms' => $isDown ? null : $definition['base_ms'],
+                    'last_http_status_code' => $isDown ? null : ($definition['type'] === MonitorType::Port ? null : 200),
+                    'last_error' => $isDown ? 'DNS Resolving problem' : null,
+                    'last_checked_at' => $now->copy()->subMinutes(2),
+                    'last_status_changed_at' => $isDown ? $now->copy()->subMinutes(40) : $now->copy()->subHours(26),
+                ]
+            );
+
+            $monitor->checks()->delete();
+            $monitor->incidents()->delete();
+
+            $checks = [];
+
+            for ($minutesAgo = 24 * 60; $minutesAgo >= 5; $minutesAgo -= 5) {
+                $checkedAt = $now->copy()->subMinutes($minutesAgo);
+                $failed = ($isDown && $minutesAgo <= 40)
+                    || ($definition['name'] === 'shop-fashionbd.com' && $minutesAgo >= 180 && $minutesAgo < 195);
+
+                $checks[] = [
+                    'monitor_id' => $monitor->id,
+                    'status' => $failed ? MonitorStatus::Down->value : MonitorStatus::Up->value,
+                    'http_status_code' => $failed || $definition['type'] === MonitorType::Port ? null : 200,
+                    'response_time_ms' => $failed ? null : max(5, $definition['base_ms'] + random_int(-60, 140)),
+                    'region' => 'primary',
+                    'error_message' => $failed ? ($isDown ? 'DNS Resolving problem' : 'HTTP 502 Bad Gateway') : null,
+                    'checked_at' => $checkedAt,
+                ];
+            }
+
+            foreach (array_chunk($checks, 100) as $chunk) {
+                MonitorCheck::insert($chunk);
+            }
+        }
+
+        $shopMonitor = Monitor::where('workspace_id', $workspace->id)->where('name', 'shop-fashionbd.com')->first();
+        $resolved = $shopMonitor->incidents()->create([
+            'workspace_id' => $workspace->id,
+            'status' => MonitorIncidentStatus::Resolved,
+            'root_cause_type' => 'http',
+            'root_cause' => 'HTTP 502 Bad Gateway',
+            'request_snapshot' => ['method' => 'GET', 'url' => 'https://shop-fashionbd.com/', 'headers' => ['User-Agent' => 'SiteVaulta-Monitor/1.0']],
+            'response_headers' => ['server' => ['nginx'], 'content-type' => ['text/html']],
+            'response_body' => '<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center></body></html>',
+            'started_at' => $now->copy()->subMinutes(195),
+            'resolved_at' => $now->copy()->subMinutes(180),
+            'duration_seconds' => 15 * 60,
+        ]);
+        $resolved->events()->createMany([
+            ['type' => 'detected', 'message' => 'HTTP 502 Bad Gateway detected', 'probe_location' => MonitorCheckRunner::PROBE_LOCATION, 'occurred_at' => $now->copy()->subMinutes(195)],
+            ['type' => 'confirmed', 'message' => 'HTTP 502 Bad Gateway confirmed by re-check', 'probe_location' => MonitorCheckRunner::PROBE_LOCATION, 'occurred_at' => $now->copy()->subMinutes(195)],
+            ['type' => 'alert_sent', 'message' => 'Down alert sent to workspace members and alert channels', 'delivery_status' => 'success', 'occurred_at' => $now->copy()->subMinutes(195)],
+            ['type' => 'resolved', 'message' => 'Monitor is back up (438 ms)', 'probe_location' => MonitorCheckRunner::PROBE_LOCATION, 'occurred_at' => $now->copy()->subMinutes(180)],
+            ['type' => 'alert_sent', 'message' => 'Recovery alert sent to workspace members and alert channels', 'delivery_status' => 'success', 'occurred_at' => $now->copy()->subMinutes(180)],
+        ]);
+
+        Monitor::updateOrCreate(
+            ['workspace_id' => $workspace->id, 'name' => 'Nightly backup cron'],
+            [
+                'type' => MonitorType::Heartbeat,
+                'interval_seconds' => 86400,
+                'heartbeat_grace_seconds' => 3600,
+                'status' => MonitorStatus::Up,
+                'last_heartbeat_at' => $now->copy()->subHours(5),
+                'last_checked_at' => $now->copy()->subMinute(),
+                'last_status_changed_at' => $now->copy()->subDays(3),
+            ]
+        );
+
+        $crmMonitor = Monitor::where('workspace_id', $workspace->id)->where('website_id', $crm->id)->first();
+        $maintenance = MaintenanceWindow::updateOrCreate(
+            ['workspace_id' => $workspace->id, 'name' => 'Weekly CRM server updates'],
+            [
+                'schedule_type' => MaintenanceScheduleType::Weekly,
+                'start_time' => '02:00',
+                'days_of_week' => [0],
+                'duration_minutes' => 60,
+                'is_active' => true,
+            ]
+        );
+        $maintenance->monitors()->sync([$crmMonitor->id]);
+
+        $statusPage = StatusPage::updateOrCreate(
+            ['slug' => "{$workspace->slug}-status"],
+            [
+                'workspace_id' => $workspace->id,
+                'name' => "{$workspace->name} — Service Status",
+                'description' => 'Live availability of our client websites and APIs.',
+                'is_published' => true,
+            ]
+        );
+        $statusPage->monitors()->sync(
+            Monitor::where('workspace_id', $workspace->id)->where('status', '!=', MonitorStatus::Paused)->pluck('id')
+        );
+
+        $apiMonitor = Monitor::where('workspace_id', $workspace->id)->where('name', 'api.travelmatrix.io')->first();
+        $ongoing = $apiMonitor->incidents()->create([
+            'workspace_id' => $workspace->id,
+            'status' => MonitorIncidentStatus::Ongoing,
+            'root_cause_type' => 'dns',
+            'root_cause' => 'DNS Resolving problem',
+            'request_snapshot' => ['method' => 'GET', 'url' => 'https://api.travelmatrix.io/', 'headers' => ['User-Agent' => 'SiteVaulta-Monitor/1.0']],
+            'response_body' => 'cURL error 6: Could not resolve host: api.travelmatrix.io',
+            'started_at' => $now->copy()->subMinutes(40),
+        ]);
+        $ongoing->events()->createMany([
+            ['type' => 'detected', 'message' => 'DNS Resolving problem detected', 'probe_location' => MonitorCheckRunner::PROBE_LOCATION, 'occurred_at' => $now->copy()->subMinutes(40)],
+            ['type' => 'confirmed', 'message' => 'DNS Resolving problem confirmed by re-check', 'probe_location' => MonitorCheckRunner::PROBE_LOCATION, 'occurred_at' => $now->copy()->subMinutes(40)],
+            ['type' => 'alert_sent', 'message' => 'Down alert sent to workspace members and alert channels', 'delivery_status' => 'success', 'occurred_at' => $now->copy()->subMinutes(40)],
+        ]);
     }
 }

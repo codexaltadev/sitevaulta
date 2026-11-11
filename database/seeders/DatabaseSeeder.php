@@ -176,6 +176,9 @@ class DatabaseSeeder extends Seeder
                 'max_team_members' => 1,
                 'min_interval_minutes' => 1440,
                 'max_retention_days' => 7,
+                'max_monitors' => 10,
+                'min_monitor_interval_seconds' => 300,
+                'max_status_pages' => 1,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,
@@ -203,6 +206,9 @@ class DatabaseSeeder extends Seeder
                 'max_team_members' => 1,
                 'min_interval_minutes' => 360,
                 'max_retention_days' => 30,
+                'max_monitors' => 25,
+                'min_monitor_interval_seconds' => 120,
+                'max_status_pages' => 1,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,
@@ -230,6 +236,9 @@ class DatabaseSeeder extends Seeder
                 'max_team_members' => 3,
                 'min_interval_minutes' => 60,
                 'max_retention_days' => 90,
+                'max_monitors' => 100,
+                'min_monitor_interval_seconds' => 60,
+                'max_status_pages' => 5,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,
@@ -257,6 +266,9 @@ class DatabaseSeeder extends Seeder
                 'max_team_members' => 10,
                 'min_interval_minutes' => 60,
                 'max_retention_days' => 365,
+                'max_monitors' => 300,
+                'min_monitor_interval_seconds' => 60,
+                'max_status_pages' => 999,
                 'features' => [
                     'incremental' => true,
                     'encryption' => true,

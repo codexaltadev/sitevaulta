@@ -55,11 +55,11 @@ class Workspace extends Model implements HasName
             }
             if (empty($workspace->slug)) {
                 $baseSlug = Str::slug($workspace->name ?: 'workspace');
-                $workspace->slug = $baseSlug . '-' . Str::lower(Str::random(5));
+                $workspace->slug = $baseSlug.'-'.Str::lower(Str::random(5));
             }
             if (empty($workspace->referral_code)) {
                 $prefix = Str::upper(Str::substr(preg_replace('/[^A-Za-z0-9]/', '', $workspace->slug ?: 'SV'), 0, 6));
-                $workspace->referral_code = 'SV-' . ($prefix ?: 'USER') . '-' . Str::upper(Str::random(4));
+                $workspace->referral_code = 'SV-'.($prefix ?: 'USER').'-'.Str::upper(Str::random(4));
             }
         });
     }
@@ -99,6 +99,31 @@ class Workspace extends Model implements HasName
     public function websites(): HasMany
     {
         return $this->hasMany(Website::class);
+    }
+
+    public function monitors(): HasMany
+    {
+        return $this->hasMany(Monitor::class);
+    }
+
+    public function verifiedDomains(): HasMany
+    {
+        return $this->hasMany(VerifiedDomain::class);
+    }
+
+    public function statusPages(): HasMany
+    {
+        return $this->hasMany(StatusPage::class);
+    }
+
+    public function maintenanceWindows(): HasMany
+    {
+        return $this->hasMany(MaintenanceWindow::class);
+    }
+
+    public function monitorIncidents(): HasMany
+    {
+        return $this->hasMany(MonitorIncident::class);
     }
 
     public function websiteVerifications(): HasMany
@@ -214,4 +239,3 @@ class Workspace extends Model implements HasName
         return false;
     }
 }
-

@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Enums\BillingCycle;
+use App\Enums\MonitorType;
 use App\Enums\PaymentGateway;
 use App\Enums\SubscriptionStatus;
 use App\Models\BackupPolicy;
@@ -75,6 +76,64 @@ class EntitlementService
         return $workspace->websites()->count() < $max;
     }
 
+    public static function monitorLimit(Workspace $workspace): int
+    {
+        $sub = $workspace->currentSubscription;
+
+        return $sub ? $sub->effectiveLimit('max_monitors') : 10;
+    }
+
+    /**
+     * Monitor types the workspace's plan allows (plans.allowed_monitor_types; empty = every type).
+     *
+     * @return list<string>
+     */
+    public static function allowedMonitorTypes(Workspace $workspace): array
+    {
+        $configured = $workspace->currentSubscription?->plan?->allowed_monitor_types;
+
+        return filled($configured)
+            ? array_values(array_intersect(array_column(MonitorType::cases(), 'value'), $configured))
+            : array_column(MonitorType::cases(), 'value');
+    }
+
+    public static function minMonitorIntervalSeconds(Workspace $workspace): int
+    {
+        $sub = $workspace->currentSubscription;
+
+        return max(60, $sub ? $sub->effectiveLimit('min_monitor_interval_seconds') : 300);
+    }
+
+    public static function remainingMonitorSlots(Workspace $workspace): int
+    {
+        if (! $workspace->hasActiveEntitlement()) {
+            return 0;
+        }
+
+        return max(0, self::monitorLimit($workspace) - $workspace->monitors()->count());
+    }
+
+    public static function canAddMonitor(Workspace $workspace): bool
+    {
+        return self::remainingMonitorSlots($workspace) > 0;
+    }
+
+    public static function statusPageLimit(Workspace $workspace): int
+    {
+        $sub = $workspace->currentSubscription;
+
+        return $sub ? $sub->effectiveLimit('max_status_pages') : 1;
+    }
+
+    public static function canAddStatusPage(Workspace $workspace): bool
+    {
+        if (! $workspace->hasActiveEntitlement()) {
+            return false;
+        }
+
+        return $workspace->statusPages()->count() < self::statusPageLimit($workspace);
+    }
+
     public static function canAddPolicy(Workspace $workspace): bool
     {
         if (! $workspace->hasActiveEntitlement()) {
@@ -119,4 +178,3 @@ class EntitlementService
         return $policy->status === 'active';
     }
 }
-

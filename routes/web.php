@@ -3,10 +3,13 @@
 use App\Http\Controllers\BillingCheckoutController;
 use App\Http\Controllers\DownloadController;
 use App\Http\Controllers\GoogleDriveOAuthController;
+use App\Http\Controllers\HeartbeatController;
+use App\Http\Controllers\StatusPageController;
 use App\Http\Controllers\Webhooks\PaymentWebhookController;
 use App\Http\Controllers\WebsiteClientReportController;
 use App\Models\EmailPackage;
 use App\Models\Plan;
+use App\Services\Monitoring\MonitoringIdentity;
 use App\Services\Settings\SystemSettingsService;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -188,6 +191,28 @@ Route::get('/app/{workspaceSlug}/websites/{websiteUuid}/client-report/pdf', [Web
     ->name('websites.client-report.pdf');
 
 // Google Drive OAuth 2.0 Redirect & Callback (Supports both /vaultix/auth/google/callback and /auth/google/callback)
+Route::get('/monitoring-ips', fn (MonitoringIdentity $identity) => view('monitoring-ips', [
+    'appName' => SystemSettingsService::get('general', 'app_name', 'SiteVaulta'),
+    'faviconUrl' => SystemSettingsService::get('general', 'favicon_url', ''),
+    'probeIps' => $identity->probeIps(),
+    'userAgent' => $identity->userAgent(),
+]))->name('monitoring.ips');
+
+Route::get('/monitoring-ips.txt', fn (MonitoringIdentity $identity) => response(implode("\n", $identity->probeIps())."\n", 200, ['Content-Type' => 'text/plain']))
+    ->name('monitoring.ips.txt');
+
+Route::match(['get', 'post', 'head'], '/heartbeat/{token}', HeartbeatController::class)
+    ->where('token', '[A-Za-z0-9]{40}')
+    ->middleware('throttle:60,1')
+    ->name('heartbeats.ping');
+
+Route::get('/status/{slug}', [StatusPageController::class, 'show'])
+    ->name('status-pages.show');
+
+Route::post('/status/{slug}/unlock', [StatusPageController::class, 'unlock'])
+    ->middleware('throttle:10,1')
+    ->name('status-pages.unlock');
+
 Route::get('/auth/google/redirect', [GoogleDriveOAuthController::class, 'redirect'])
     ->name('google.oauth.redirect');
 Route::get('/vaultix/auth/google/redirect', [GoogleDriveOAuthController::class, 'redirect'])
@@ -203,7 +228,7 @@ Route::get('/r/{code}', function (string $code) {
     session(['sitevaulta_referral_code' => $clean]);
     cookie()->queue('sitevaulta_referral_code', $clean, 60 * 24 * 30);
 
-    return redirect('/app/register?ref=' . urlencode($clean));
+    return redirect('/app/register?ref='.urlencode($clean));
 })->name('referral.redirect');
 
 // Multi-Gateway Billing Webhooks (SSLCOMMERZ BDT, Stripe USD, PayPal USD)
