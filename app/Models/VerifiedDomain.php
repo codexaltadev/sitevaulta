@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\WebsiteVerificationStatus;
 use App\Services\Monitoring\WebsiteMonitorSync;
 use App\Services\Verification\OwnershipChallengeChecker;
+use Carbon\CarbonInterface;
 use Database\Factories\VerifiedDomainFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -28,11 +29,11 @@ class VerifiedDomain extends Model
 
     public const META_TAG_NAME = OwnershipChallengeChecker::META_TAG_NAME;
 
-    /** Verified domains are re-checked this often (days). */
-    public const REVERIFY_AFTER_DAYS = 7;
+    /** Days the owner has to put a removed token back before the verification lapses. */
+    public const GRACE_DAYS = 7;
 
-    /** Consecutive failed re-checks that revoke the verification. */
-    public const REVOKE_AFTER_FAILURES = 2;
+    /** Days into the grace period on which a reminder is sent (day 0 is the first notice). */
+    public const REMINDER_DAYS = [3, 5, 6];
 
     protected $fillable = [
         'workspace_id',
@@ -43,7 +44,9 @@ class VerifiedDomain extends Model
         'verified_at',
         'last_attempted_at',
         'last_error',
-        'reverify_failures',
+        'token_missing_since',
+        'last_reminder_day',
+        'ownership_lapsed_at',
     ];
 
     protected function casts(): array
@@ -51,8 +54,49 @@ class VerifiedDomain extends Model
         return [
             'verified_at' => 'datetime',
             'last_attempted_at' => 'datetime',
-            'reverify_failures' => 'integer',
+            'token_missing_since' => 'datetime',
+            'last_reminder_day' => 'integer',
+            'ownership_lapsed_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Records a successful proof: verified (keeping the original date), countdown and lapse cleared.
+     */
+    public function markProven(string $method): void
+    {
+        $this->forceFill([
+            'verified_at' => $this->verified_at ?? now(),
+            'verification_method' => $method,
+            'last_attempted_at' => now(),
+            'last_error' => null,
+            'token_missing_since' => null,
+            'last_reminder_day' => null,
+            'ownership_lapsed_at' => null,
+        ])->save();
+    }
+
+    /**
+     * Whether the token has gone missing and the 7-day countdown is running.
+     */
+    public function isInGracePeriod(): bool
+    {
+        return $this->isVerified() && $this->token_missing_since !== null;
+    }
+
+    public function graceEndsAt(): ?CarbonInterface
+    {
+        return $this->token_missing_since?->copy()->addDays(self::GRACE_DAYS);
+    }
+
+    /**
+     * Whole days left before the verification lapses (0 = lapses at the next check).
+     */
+    public function graceDaysLeft(): ?int
+    {
+        $endsAt = $this->graceEndsAt();
+
+        return $endsAt === null ? null : max(0, (int) ceil(now()->diffInSeconds($endsAt, false) / 86400));
     }
 
     protected static function booted(): void

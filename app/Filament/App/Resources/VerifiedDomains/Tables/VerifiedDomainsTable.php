@@ -32,15 +32,26 @@ class VerifiedDomainsTable
                 TextColumn::make('verified_at')
                     ->label('Status')
                     ->badge()
-                    ->state(fn (VerifiedDomain $record): string => $record->isVerified() ? 'Verified' : 'Pending')
-                    ->color(fn (string $state): string => $state === 'Verified' ? 'success' : 'warning')
+                    ->state(fn (VerifiedDomain $record): string => match (true) {
+                        $record->isInGracePeriod() => 'Token missing',
+                        $record->isVerified() => 'Verified',
+                        $record->ownership_lapsed_at !== null => 'Lapsed',
+                        default => 'Pending',
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        'Verified' => 'success',
+                        'Lapsed' => 'danger',
+                        default => 'warning',
+                    })
                     // A short line here; the per-method details are in the tooltip and the "How to verify" modal.
                     ->description(fn (VerifiedDomain $record): ?string => match (true) {
-                        $record->isVerified() => 'via '.$record->methodLabel().', '.$record->verified_at->diffForHumans(),
+                        $record->isInGracePeriod() => 'Put it back by '.$record->graceEndsAt()?->format('M j').' ('.$record->graceDaysLeft().' '.str('day')->plural((int) $record->graceDaysLeft()).' left) or '.($record->isFromBackupWebsite() ? 'backups' : 'port checks').' pause',
+                        $record->isVerified() => 'via '.$record->methodLabel().', '.$record->verified_at->diffForHumans().' · re-checked daily',
+                        $record->ownership_lapsed_at !== null => ($record->isFromBackupWebsite() ? 'Backups' : 'Port checks').' paused '.$record->ownership_lapsed_at->diffForHumans().' — put the token back and click "Verify now"',
                         filled($record->last_error) => 'Token not found yet — hover or open "How to verify"',
                         default => 'Add the token, then click "Verify now"',
                     })
-                    ->tooltip(fn (VerifiedDomain $record): ?string => ! $record->isVerified() && filled($record->last_error)
+                    ->tooltip(fn (VerifiedDomain $record): ?string => (! $record->isVerified() || $record->isInGracePeriod()) && filled($record->last_error)
                         ? collect($record->errorLines())->map(fn (string $line): string => "✗ {$line}")->implode("\n")
                         : null),
                 TextColumn::make('source')
@@ -60,7 +71,7 @@ class VerifiedDomainsTable
                     ->label('How to verify')
                     ->icon(Heroicon::OutlinedInformationCircle)
                     ->color('gray')
-                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite() && $record->isVerified())
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite() && $record->isVerified() && ! $record->isInGracePeriod())
                     ->modalHeading(fn (VerifiedDomain $record): string => "Verify {$record->domain}")
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close')
@@ -69,7 +80,7 @@ class VerifiedDomainsTable
                             ->label(fn (VerifiedDomain $record): string => 'Last attempt '.($record->last_attempted_at?->diffForHumans() ?? '').' — not found with:')
                             ->state(fn (VerifiedDomain $record): HtmlString => $record->errorListHtml())
                             ->color('danger')
-                            ->visible(fn (VerifiedDomain $record): bool => ! $record->isVerified() && filled($record->last_error)),
+                            ->visible(fn (VerifiedDomain $record): bool => (! $record->isVerified() || $record->isInGracePeriod()) && filled($record->last_error)),
                         TextEntry::make('dns')
                             ->label('Option 1 — DNS TXT record (recommended)')
                             ->state(fn (VerifiedDomain $record): string => "Name: {$record->dnsRecordName()}   ·   Type: TXT   ·   Value: {$record->token}")
@@ -90,7 +101,7 @@ class VerifiedDomainsTable
                     ->label('Verify now')
                     ->icon(Heroicon::OutlinedShieldCheck)
                     ->color('success')
-                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite() && $record->isVerified())
+                    ->hidden(fn (VerifiedDomain $record): bool => $record->isFromBackupWebsite() && $record->isVerified() && ! $record->isInGracePeriod())
                     ->action(function (VerifiedDomain $record): void {
                         $verified = app(HostOwnershipVerifier::class)->verify($record);
 

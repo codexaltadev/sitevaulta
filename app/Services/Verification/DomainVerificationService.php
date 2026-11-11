@@ -54,13 +54,7 @@ class DomainVerificationService
             return $result;
         }
 
-        $verifiedDomain->update([
-            'verified_at' => $verifiedDomain->verified_at ?? now()->utc(),
-            'verification_method' => $method->value,
-            'last_attempted_at' => now()->utc(),
-            'last_error' => null,
-            'reverify_failures' => 0,
-        ]);
+        $verifiedDomain->markProven($method->value);
 
         AuditLogService::log(
             event: 'website.verified',
@@ -73,14 +67,14 @@ class DomainVerificationService
     }
 
     /**
-     * A failed manual re-check never revokes a website that is already proven (backups keep running);
-     * only an unproven domain records the reason.
+     * A failed manual attempt never revokes a website that is already proven (backups keep running);
+     * only the daily re-check, after its 7-day grace period, can do that.
      */
     private static function recordFailure(VerifiedDomain $verifiedDomain, string $message): void
     {
         $verifiedDomain->update([
             'last_attempted_at' => now()->utc(),
-            'last_error' => $verifiedDomain->isVerified() ? null : mb_substr($message, 0, 500),
+            'last_error' => mb_substr($message, 0, 500),
         ]);
     }
 }

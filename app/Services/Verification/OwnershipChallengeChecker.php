@@ -63,6 +63,7 @@ class OwnershipChallengeChecker
     public function checkAny(string $domain, string $token, ?string $siteUrl = null): VerificationResult
     {
         $failures = [];
+        $conclusive = true;
 
         foreach (VerificationMethod::cases() as $method) {
             $result = $this->check($method, $domain, $token, $siteUrl);
@@ -72,23 +73,35 @@ class OwnershipChallengeChecker
             }
 
             $failures[] = $result->message;
+            $conclusive = $conclusive && $result->conclusive;
         }
 
-        // One short line per method, so pages can show them as a list.
-        return new VerificationResult(false, VerificationMethod::DnsTxt, implode("\n", $failures));
+        // One short line per method, so pages can show them as a list. "Gone" is only certain when every
+        // method got a real answer; one unreachable method means the token may still be there.
+        return new VerificationResult(false, VerificationMethod::DnsTxt, implode("\n", $failures), conclusive: $conclusive);
     }
 
     private function checkDnsTxt(string $domain, string $token): VerificationResult
     {
+        $resolverAnswered = true;
+
         foreach ([self::DNS_PREFIX.$domain, $domain] as $name) {
-            foreach ($this->networkProbe->dnsRecords($name, 'TXT') ?? [] as $txt) {
+            $records = $this->networkProbe->dnsRecords($name, 'TXT');
+            $resolverAnswered = $resolverAnswered && $records !== null;
+
+            foreach ($records ?? [] as $txt) {
                 if (str_contains(mb_strtolower($txt), $token)) {
                     return new VerificationResult(true, VerificationMethod::DnsTxt, "DNS TXT record matched on {$name}.");
                 }
             }
         }
 
-        return new VerificationResult(false, VerificationMethod::DnsTxt, 'DNS TXT record: not found yet. New records can take a few minutes to appear.');
+        return new VerificationResult(
+            false,
+            VerificationMethod::DnsTxt,
+            $resolverAnswered ? 'DNS TXT record: not found yet. New records can take a few minutes to appear.' : 'DNS TXT record: the DNS lookup failed, so it could not be checked.',
+            conclusive: $resolverAnswered,
+        );
     }
 
     /**
@@ -126,6 +139,10 @@ class OwnershipChallengeChecker
         $label = $isMetaTag ? 'Meta tag' : 'Verification file';
         $statuses = implode(', ', array_unique($httpStatuses));
 
+        // A real answer: the page loaded without the token, or the file is definitely not there (404 / 410).
+        // Down, 5xx, 401/403 (often a firewall) or unreachable says nothing about the token.
+        $conclusive = $answeredWithoutToken || (! $isMetaTag && array_intersect($httpStatuses, [404, 410]) !== []);
+
         return new VerificationResult(false, $method, $label.': '.match (true) {
             $answeredWithoutToken && $isMetaTag => 'not found in the homepage <head>.',
             $answeredWithoutToken => 'the file was found, but it does not contain your token.',
@@ -134,7 +151,7 @@ class OwnershipChallengeChecker
             $httpStatuses !== [] => "the site returned HTTP {$statuses}.",
             $unreachable => 'could not reach the site.',
             default => 'not found.',
-        });
+        }, conclusive: $conclusive);
     }
 
     /**

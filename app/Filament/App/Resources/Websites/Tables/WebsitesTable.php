@@ -51,18 +51,25 @@ class WebsitesTable
                     ->label('Ownership Status')
                     ->badge()
                     ->state(fn (Website $record): WebsiteVerificationStatus => $record->verificationStatus())
-                    ->formatStateUsing(fn (WebsiteVerificationStatus $state): string => $state === WebsiteVerificationStatus::Verified ? 'Verified Owner' : $state->label())
-                    ->icon(fn (WebsiteVerificationStatus $state): Heroicon => match ($state) {
-                        WebsiteVerificationStatus::Verified => Heroicon::OutlinedShieldCheck,
-                        WebsiteVerificationStatus::Failed => Heroicon::OutlinedShieldExclamation,
+                    ->formatStateUsing(fn (WebsiteVerificationStatus $state, Website $record): string => match (true) {
+                        $record->verifiedDomain?->isInGracePeriod() => 'Token missing — backups pause in '.$record->verifiedDomain->graceDaysLeft().' '.str('day')->plural((int) $record->verifiedDomain->graceDaysLeft()),
+                        $record->verifiedDomain?->ownership_lapsed_at !== null && $state !== WebsiteVerificationStatus::Verified => 'Backups paused — token removed',
+                        $state === WebsiteVerificationStatus::Verified => 'Verified Owner',
+                        default => $state->label(),
+                    })
+                    ->icon(fn (WebsiteVerificationStatus $state, Website $record): Heroicon => match (true) {
+                        (bool) $record->verifiedDomain?->isInGracePeriod() => Heroicon::OutlinedExclamationTriangle,
+                        $state === WebsiteVerificationStatus::Verified => Heroicon::OutlinedShieldCheck,
+                        $state === WebsiteVerificationStatus::Failed => Heroicon::OutlinedShieldExclamation,
                         default => Heroicon::OutlinedClock,
                     })
-                    ->tooltip(fn (Website $record, WebsiteVerificationStatus $state): string => match ($state) {
-                        WebsiteVerificationStatus::Verified => 'Ownership proven via '.$record->verifiedDomain?->methodLabel().' — this domain also counts as verified for uptime monitoring (port checks allowed).',
-                        WebsiteVerificationStatus::Failed => collect($record->verifiedDomain?->errorLines() ?? [])->map(fn (string $line): string => "✗ {$line}")->implode("\n"),
+                    ->tooltip(fn (Website $record, WebsiteVerificationStatus $state): string => match (true) {
+                        (bool) $record->verifiedDomain?->isInGracePeriod() => 'The verification token was not found on your site. Put it back by '.$record->verifiedDomain->graceEndsAt()?->format('M j, Y').' (DNS TXT, file or meta tag — see "Verify Ownership") or backups will be paused.',
+                        $state === WebsiteVerificationStatus::Verified => 'Ownership proven via '.$record->verifiedDomain?->methodLabel().' — re-checked daily. This domain also counts as verified for uptime monitoring (port checks allowed).',
+                        $state === WebsiteVerificationStatus::Failed => collect($record->verifiedDomain?->errorLines() ?? [])->map(fn (string $line): string => "✗ {$line}")->implode("\n"),
                         default => 'Verify ownership to unlock backups and port checks for this domain.',
                     })
-                    ->color(fn (WebsiteVerificationStatus $state): string => $state->color()),
+                    ->color(fn (WebsiteVerificationStatus $state, Website $record): string => $record->verifiedDomain?->isInGracePeriod() ? 'warning' : $state->color()),
 
                 TextColumn::make('uptime_status')
                     ->label('Live Domain & Server Status')

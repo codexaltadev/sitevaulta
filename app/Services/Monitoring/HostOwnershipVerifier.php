@@ -2,6 +2,7 @@
 
 namespace App\Services\Monitoring;
 
+use App\DataTransferObjects\VerificationResult;
 use App\Models\ServerConnection;
 use App\Models\VerifiedDomain;
 use App\Models\Website;
@@ -113,50 +114,31 @@ class HostOwnershipVerifier
      */
     public function verify(VerifiedDomain $verifiedDomain): bool
     {
-        $result = $this->challengeChecker->checkAny($verifiedDomain->domain, $verifiedDomain->token);
-
-        $verifiedDomain->forceFill([
-            'last_attempted_at' => now(),
-            'verified_at' => $result->verified ? ($verifiedDomain->verified_at ?? now()) : null,
-            'verification_method' => $result->verified ? $result->method->value : null,
-            'last_error' => $result->verified ? null : mb_substr($result->message, 0, 500),
-        ])->save();
-
-        return $result->verified;
-    }
-
-    /**
-     * Periodic re-check of an already verified domain. A single miss (DNS hiccup, deploy in progress) only
-     * records a warning; REVOKE_AFTER_FAILURES misses in a row revoke the verification.
-     *
-     * @return 'verified'|'warning'|'revoked'
-     */
-    public function reverify(VerifiedDomain $verifiedDomain): string
-    {
-        $result = $this->challengeChecker->checkAny($verifiedDomain->domain, $verifiedDomain->token);
+        $result = $this->check($verifiedDomain);
 
         if ($result->verified) {
-            $verifiedDomain->forceFill([
-                'last_attempted_at' => now(),
-                'verification_method' => $result->method->value,
-                'last_error' => null,
-                'reverify_failures' => 0,
-            ])->save();
+            $verifiedDomain->markProven($result->method->value);
 
-            return 'verified';
+            return true;
         }
 
-        $failures = $verifiedDomain->reverify_failures + 1;
-        $revoke = $failures >= VerifiedDomain::REVOKE_AFTER_FAILURES;
-
+        // A failed manual attempt never revokes an existing proof; only the daily re-check (with its
+        // 7-day grace period) can do that.
         $verifiedDomain->forceFill([
             'last_attempted_at' => now(),
             'last_error' => mb_substr($result->message, 0, 500),
-            'reverify_failures' => $revoke ? 0 : $failures,
-            'verified_at' => $revoke ? null : $verifiedDomain->verified_at,
         ])->save();
 
-        return $revoke ? 'revoked' : 'warning';
+        return false;
+    }
+
+    /**
+     * Looks for the token by every method; a backup website's own URL is used for the file and meta tag
+     * (it may live in a sub-folder).
+     */
+    public function check(VerifiedDomain $verifiedDomain): VerificationResult
+    {
+        return $this->challengeChecker->checkAny($verifiedDomain->domain, $verifiedDomain->token, $verifiedDomain->website?->url);
     }
 
     /**
