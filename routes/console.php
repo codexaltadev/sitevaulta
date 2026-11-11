@@ -13,3 +13,4 @@ Schedule::command('sitevaulta:check-websites-uptime')->everyFiveMinutes()->witho
 Schedule::command('sitevaulta:check-monitors')->everyMinute()->withoutOverlapping(10);
 Schedule::command('sitevaulta:prune-monitor-data')->dailyAt('03:15')->withoutOverlapping();
 Schedule::command('sitevaulta:reverify-domains')->everySixHours()->withoutOverlapping();
+Schedule::command('sitevaulta:send-monthly-uptime-reports')->monthlyOn(1, '06:00')->withoutOverlapping();

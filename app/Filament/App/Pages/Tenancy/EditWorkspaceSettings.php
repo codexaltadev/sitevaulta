@@ -56,6 +56,8 @@ class EditWorkspaceSettings extends EditTenantProfile
         $data['quiet_hours_enabled'] = WorkspaceSettingsService::get($workspace, 'notifications', 'quiet_hours_enabled', false);
         $data['quiet_hours_start'] = WorkspaceSettingsService::get($workspace, 'notifications', 'quiet_hours_start', '23:00');
         $data['quiet_hours_end'] = WorkspaceSettingsService::get($workspace, 'notifications', 'quiet_hours_end', '07:00');
+        $data['monthly_uptime_report'] = WorkspaceSettingsService::get($workspace, 'reports', 'monthly_uptime_report', true);
+        $data['monthly_uptime_report_email'] = WorkspaceSettingsService::get($workspace, 'reports', 'monthly_uptime_report_email', '');
 
         $whitelabel = $workspace->whitelabel_config ?? [];
         $data['agency_company_name'] = $whitelabel['company_name'] ?? $workspace->name;
@@ -182,6 +184,21 @@ class EditWorkspaceSettings extends EditTenantProfile
                                             ->label('Quiet Hours End (24h HH:MM)')
                                             ->placeholder('07:00'),
                                     ]),
+
+                                Section::make('Monthly Uptime Report')
+                                    ->description('On the 1st of every month: uptime %, incidents, downtime and response time of every monitor for the month before.')
+                                    ->columns(2)
+                                    ->schema([
+                                        Toggle::make('monthly_uptime_report')
+                                            ->label('Email the monthly uptime report')
+                                            ->columnSpanFull(),
+                                        TextInput::make('monthly_uptime_report_email')
+                                            ->label('Send it to')
+                                            ->email()
+                                            ->maxLength(191)
+                                            ->placeholder(fn (): string => (string) $this->tenant?->owner?->email)
+                                            ->helperText('Leave empty to send it to the workspace owner.'),
+                                    ]),
                             ]),
 
                         Tab::make('Agency White-Label Branding')
@@ -266,6 +283,8 @@ class EditWorkspaceSettings extends EditTenantProfile
         WorkspaceSettingsService::set($record, 'notifications', 'quiet_hours_enabled', (bool) ($data['quiet_hours_enabled'] ?? false), 'boolean');
         WorkspaceSettingsService::set($record, 'notifications', 'quiet_hours_start', $data['quiet_hours_start'] ?? '23:00', 'string');
         WorkspaceSettingsService::set($record, 'notifications', 'quiet_hours_end', $data['quiet_hours_end'] ?? '07:00', 'string');
+        WorkspaceSettingsService::set($record, 'reports', 'monthly_uptime_report', (bool) ($data['monthly_uptime_report'] ?? true), 'boolean');
+        WorkspaceSettingsService::set($record, 'reports', 'monthly_uptime_report_email', trim((string) ($data['monthly_uptime_report_email'] ?? '')), 'string');
 
         AuditLogService::log(
             event: 'workspace.settings.updated',

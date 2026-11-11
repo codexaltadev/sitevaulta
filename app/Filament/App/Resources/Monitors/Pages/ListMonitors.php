@@ -10,16 +10,21 @@ use App\Services\Billing\EntitlementService;
 use App\Services\Monitoring\HostOwnershipVerifier;
 use App\Services\Monitoring\MonitorCheckRunner;
 use App\Services\Monitoring\MonitorUptimeStatistics;
+use App\Services\Monitoring\MonthlyUptimeReport;
 use App\Services\Monitoring\WebsiteMonitorSync;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Livewire\Attributes\Url;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * UptimeRobot-style monitors overview: dense one-line rows with 24 hourly bars on the left,
@@ -74,11 +79,52 @@ class ListMonitors extends Page
                 ->modalDescription('Creates an HTTP(s) monitor for every website in this workspace that does not have one yet.')
                 ->action(fn () => $this->importWebsites()),
 
+            Action::make('monthlyReport')
+                ->label('Monthly report')
+                ->icon(Heroicon::OutlinedDocumentChartBar)
+                ->color('gray')
+                ->modalHeading('Download the monthly uptime report')
+                ->modalDescription('Uptime %, incidents, downtime and response time of every monitor. It is also emailed on the 1st of each month (Workspace settings → Notification Preferences).')
+                ->modalSubmitActionLabel('Download PDF')
+                ->schema([
+                    Select::make('month')
+                        ->options(self::reportMonthOptions())
+                        ->default(now('UTC')->subMonthNoOverflow()->format('Y-m'))
+                        ->required(),
+                ])
+                ->action(fn (array $data) => $this->downloadMonthlyReport((string) $data['month'])),
+
             Action::make('create')
                 ->label('New')
                 ->icon(Heroicon::OutlinedPlus)
                 ->url(MonitorResource::getUrl('create')),
         ];
+    }
+
+    /**
+     * This month and the eleven before it, newest first ("2026-11" => "November 2026 (so far)").
+     *
+     * @return array<string, string>
+     */
+    public static function reportMonthOptions(): array
+    {
+        return collect(range(0, 11))
+            ->mapWithKeys(function (int $monthsAgo): array {
+                $month = CarbonImmutable::now('UTC')->startOfMonth()->subMonthsNoOverflow($monthsAgo);
+
+                return [$month->format('Y-m') => $month->format('F Y').($monthsAgo === 0 ? ' (so far)' : '')];
+            })
+            ->all();
+    }
+
+    public function downloadMonthlyReport(string $month): StreamedResponse
+    {
+        abort_unless(array_key_exists($month, self::reportMonthOptions()), 422);
+
+        $data = app(MonthlyUptimeReport::class)->build($this->workspace(), CarbonImmutable::createFromFormat('Y-m-d', "{$month}-01", 'UTC'));
+        $pdf = Pdf::loadView('reports.monthly-uptime', $data)->setPaper('a4');
+
+        return response()->streamDownload(fn () => print $pdf->output(), "uptime-report-{$month}.pdf", ['Content-Type' => 'application/pdf']);
     }
 
     public function pauseMonitor(int $monitorId): void
