@@ -50,12 +50,11 @@ class MonitorChildChecksSync
     }
 
     /**
-     * Best guess at the registrable domain for RDAP ("www.shop.example.com" → "shop.example.com").
-     * The user can correct it in the Domain tab (e.g. sub-domains under ccTLDs such as .edu.bd).
+     * The registered domain whose expiry matters ("elearn.daffodilvarsity.edu.bd" → "daffodilvarsity.edu.bd").
      */
     public static function suggestedDomainFor(?string $host): ?string
     {
-        return $host === null ? null : preg_replace('/^www\./', '', $host);
+        return RegistrableDomain::of($host);
     }
 
     /**

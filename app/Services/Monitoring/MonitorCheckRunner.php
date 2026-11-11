@@ -313,14 +313,17 @@ class MonitorCheckRunner
     private function probeDomain(Monitor $monitor): array
     {
         $startedAt = microtime(true);
-        $lookupUrl = 'https://rdap.org/domain/'.rawurlencode((string) $monitor->host);
+        // Registries only know the registered domain, never a sub-domain such as elearn.example.edu.bd.
+        $domain = RegistrableDomain::of($monitor->host) ?? (string) $monitor->host;
+        $lookupUrl = 'https://rdap.org/domain/'.rawurlencode($domain);
 
-        // Source order: a date the user typed in, then the registry over RDAP, then the last date we
-        // knew. Some registries (e.g. .bd) publish no RDAP/WHOIS data at all; an unreadable date is
-        // "unknown", never an outage, so it opens no incident.
+        // Source order: a date the user typed in, the registry over RDAP, a date another check of the same
+        // registered domain already knows, then the last date we knew. Some registries (e.g. .bd) publish
+        // no RDAP/WHOIS data at all; an unreadable date is "unknown", never an outage, so it opens no incident.
         [$expiresAt, $source] = match (true) {
             $monitor->manual_expires_at !== null => [CarbonImmutable::parse($monitor->manual_expires_at->toDateString(), 'UTC')->endOfDay(), 'manual'],
             ($rdapExpiry = $this->rdapExpiry($lookupUrl, $monitor->timeout_seconds)) !== null => [$rdapExpiry, 'rdap'],
+            ($sharedExpiry = $this->sharedDomainExpiry($monitor, $domain)) !== null => [$sharedExpiry, 'shared'],
             $monitor->expires_at !== null => [CarbonImmutable::instance($monitor->expires_at), 'cached'],
             default => [null, 'unavailable'],
         };
@@ -339,6 +342,30 @@ class MonitorCheckRunner
             expiresAt: $expiresAt,
             probeMethod: $source,
         );
+    }
+
+    /**
+     * The expiry date another domain check in the same workspace knows for this registered domain — a date
+     * typed in by hand, or one read from the registry — so a .bd date only has to be entered once.
+     */
+    private function sharedDomainExpiry(Monitor $monitor, string $domain): ?CarbonImmutable
+    {
+        $sibling = Monitor::query()
+            ->where('workspace_id', $monitor->workspace_id)
+            ->where('type', MonitorType::Domain)
+            ->whereKeyNot($monitor->getKey())
+            ->where(fn ($query) => $query->whereNotNull('manual_expires_at')
+                ->orWhere(fn ($query) => $query->whereNotNull('expires_at')->whereIn('last_probe_method', ['rdap', 'manual'])))
+            ->get(['id', 'host', 'manual_expires_at', 'expires_at'])
+            ->filter(fn (Monitor $candidate): bool => RegistrableDomain::of($candidate->host) === $domain)
+            ->sortByDesc(fn (Monitor $candidate): bool => $candidate->manual_expires_at !== null)
+            ->first();
+
+        return match (true) {
+            $sibling?->manual_expires_at !== null => CarbonImmutable::parse($sibling->manual_expires_at->toDateString(), 'UTC')->endOfDay(),
+            $sibling?->expires_at !== null => CarbonImmutable::instance($sibling->expires_at),
+            default => null,
+        };
     }
 
     private function rdapExpiry(string $lookupUrl, int $timeoutSeconds): ?CarbonImmutable

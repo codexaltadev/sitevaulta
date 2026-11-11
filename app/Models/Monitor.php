@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\MonitorIncidentStatus;
 use App\Enums\MonitorStatus;
 use App\Enums\MonitorType;
+use App\Services\Monitoring\RegistrableDomain;
 use Carbon\CarbonInterface;
 use Database\Factories\MonitorFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -155,9 +156,9 @@ class Monitor extends Model
             }
 
             // The scheduler only looks at monitors whose next_check_at has passed (null = due now).
-            if ($monitor->isDirty(['last_checked_at', 'interval_seconds', 'type'])) {
+            if ($monitor->isDirty(['last_checked_at', 'interval_seconds', 'type', 'status'])) {
                 $monitor->next_check_at = $monitor->last_checked_at?->copy()->addSeconds(
-                    $monitor->type === MonitorType::Heartbeat ? 60 : max(30, (int) $monitor->interval_seconds),
+                    $monitor->type === MonitorType::Heartbeat ? 60 : $monitor->effectiveIntervalSeconds(),
                 );
             }
         });
@@ -252,6 +253,19 @@ class Monitor extends Model
         }
 
         return self::normalizeHost($this->type?->usesUrl() ? $this->url : $this->host);
+    }
+
+    /**
+     * Seconds between checks. A failing expiry check (domain / SSL) is re-checked hourly instead of daily, so
+     * a renewal clears the alert within the hour.
+     */
+    public function effectiveIntervalSeconds(): int
+    {
+        $interval = max(30, (int) $this->interval_seconds);
+
+        return $this->type?->isExpiryCheck() && $this->status === MonitorStatus::Down
+            ? min($interval, 3600)
+            : $interval;
     }
 
     /**
@@ -368,6 +382,7 @@ class Monitor extends Model
             $this->last_probe_method === 'rdap' => 'RDAP registry lookup',
             $this->last_probe_method === 'manual' => 'Manual expiry date (this registry publishes no RDAP/WHOIS data)',
             $this->last_probe_method === 'cached' => 'Last known expiry date (the RDAP lookup failed this time)',
+            $this->last_probe_method === 'shared' => 'Expiry date of '.RegistrableDomain::of($this->host).' from another domain check in this workspace',
             $this->expiryIsUnknown() => 'Not available — this registry (e.g. .bd) publishes no expiry date. Add the date manually in Edit.',
             $this->last_probe_method === 'icmp' => 'ICMP ping',
             $this->measuredOverTcp() => 'TCP port '.substr((string) $this->last_probe_method, 4).' — the server does not answer ping (firewall)',
@@ -450,7 +465,7 @@ class Monitor extends Model
         }
 
         return $this->last_checked_at === null
-            || $this->last_checked_at->addSeconds($this->interval_seconds)->lte(now()->utc());
+            || $this->last_checked_at->addSeconds($this->effectiveIntervalSeconds())->lte(now()->utc());
     }
 
     /**

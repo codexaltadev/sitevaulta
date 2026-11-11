@@ -41,7 +41,7 @@ class CheckMonitorsCommand extends Command
                 // Not due yet but never scheduled (e.g. checked before next_check_at existed): schedule it,
                 // so it is not re-read every minute until its next run.
                 if (! $isDue && $monitor->next_check_at === null && $monitor->last_checked_at !== null && $monitor->type !== MonitorType::Heartbeat) {
-                    $monitor->forceFill(['next_check_at' => $monitor->last_checked_at->copy()->addSeconds(max(30, (int) $monitor->interval_seconds))])->saveQuietly();
+                    $monitor->forceFill(['next_check_at' => $monitor->last_checked_at->copy()->addSeconds($monitor->effectiveIntervalSeconds())])->saveQuietly();
                 }
 
                 return $isDue && ! $monitor->isUnderMaintenance();

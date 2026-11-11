@@ -13,6 +13,7 @@ use App\Models\Workspace;
 use App\Services\Monitoring\MonitorCheckRunner;
 use App\Services\Monitoring\MonitorSetupAdvisor;
 use App\Services\Monitoring\NetworkProbe;
+use App\Services\Monitoring\RegistrableDomain;
 use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -402,6 +403,55 @@ class MonitorTypesTest extends TestCase
         app(MonitorCheckRunner::class)->run($monitor);
 
         $this->assertStringStartsWith('Domain registration expires in 3 days', MonitorIncident::sole()->root_cause);
+    }
+
+    public function test_registered_domain_is_derived_from_a_sub_domain(): void
+    {
+        $this->assertSame('daffodilvarsity.edu.bd', RegistrableDomain::of('elearn.daffodilvarsity.edu.bd'));
+        $this->assertSame('example.co.uk', RegistrableDomain::of('www.shop.example.co.uk'));
+        $this->assertSame('example.com', RegistrableDomain::of('api.v2.example.com'));
+        $this->assertSame('my-softit.com', RegistrableDomain::of('my-softit.com'));
+        $this->assertNull(RegistrableDomain::of('93.184.216.34'));
+    }
+
+    public function test_a_sub_domain_check_reads_the_registered_domain_expiry(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake(['https://rdap.org/domain/example.com' => Http::response([
+            'events' => [['eventAction' => 'expiration', 'eventDate' => now()->addYear()->toIso8601String()]],
+        ])]);
+        $monitor = Monitor::factory()->create(['type' => MonitorType::Domain, 'url' => null, 'host' => 'shop.example.com']);
+
+        app(MonitorCheckRunner::class)->run($monitor);
+
+        $this->assertSame(['rdap', MonitorStatus::Up], [$monitor->refresh()->last_probe_method, $monitor->status]);
+        $this->assertNotNull($monitor->expires_at);
+    }
+
+    public function test_a_bd_expiry_date_entered_once_is_shared_with_other_checks_of_the_same_domain(): void
+    {
+        Http::fake(['https://rdap.org/*' => Http::response([], 404)]);
+        $main = Monitor::factory()->create(['type' => MonitorType::Domain, 'url' => null, 'host' => 'daffodilvarsity.edu.bd', 'manual_expires_at' => now()->addMonths(2)]);
+        $subDomain = Monitor::factory()->create(['workspace_id' => $main->workspace_id, 'type' => MonitorType::Domain, 'url' => null, 'host' => 'elearn.daffodilvarsity.edu.bd']);
+
+        app(MonitorCheckRunner::class)->run($subDomain);
+
+        $subDomain->refresh();
+        $this->assertSame('shared', $subDomain->last_probe_method);
+        $this->assertSame($main->manual_expires_at->toDateString(), $subDomain->expires_at->toDateString());
+        $this->assertSame('Expiry date of daffodilvarsity.edu.bd from another domain check in this workspace', $subDomain->probeMethodLabel());
+    }
+
+    public function test_a_failing_expiry_check_is_re_checked_hourly_so_a_renewal_shows_up_soon(): void
+    {
+        $this->freezeTime();
+        $monitor = Monitor::factory()->down()->create(['type' => MonitorType::Domain, 'url' => null, 'host' => 'example.com', 'interval_seconds' => 86400, 'last_checked_at' => now()]);
+
+        $this->assertSame(3600, $monitor->effectiveIntervalSeconds());
+        $this->assertSame(now()->addHour()->toDateTimeString(), $monitor->next_check_at->toDateTimeString());
+
+        $monitor->update(['status' => MonitorStatus::Up]);
+        $this->assertSame(now()->addDay()->toDateTimeString(), $monitor->next_check_at->toDateTimeString());
     }
 
     public function test_registry_without_rdap_shows_unknown_instead_of_an_outage(): void
