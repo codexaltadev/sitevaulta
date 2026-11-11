@@ -7,6 +7,7 @@ use Database\Factories\VerifiedDomainFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
 /**
@@ -107,6 +108,26 @@ class VerifiedDomain extends Model
     public function dnsRecordName(): string
     {
         return self::DNS_PREFIX.$this->domain;
+    }
+
+    /**
+     * The last failed attempt, one line per verification method.
+     *
+     * @return list<string>
+     */
+    public function errorLines(): array
+    {
+        return array_values(array_filter(array_map('trim', explode("\n", (string) $this->last_error))));
+    }
+
+    /**
+     * The failure lines as an HTML list (✗ per method), for tables, modals and notifications.
+     */
+    public function errorListHtml(): HtmlString
+    {
+        return new HtmlString(collect($this->errorLines())
+            ->map(fn (string $line): string => '<div>✗ '.e($line).'</div>')
+            ->implode(''));
     }
 
     public function metaTag(): string

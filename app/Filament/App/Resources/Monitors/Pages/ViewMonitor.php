@@ -216,7 +216,7 @@ class ViewMonitor extends Page
         $notification = Notification::make()->title($verified ? "{$verifiedDomain->domain} is verified" : 'Verification failed');
         $verified
             ? $notification->success()->body('Ownership is proven — port checks are now allowed on this host.')
-            : $notification->danger()->body($verifiedDomain->last_error.' DNS changes can take a few minutes to appear.');
+            : $notification->danger()->body($verifiedDomain->errorListHtml());
         $notification->send();
     }
 

@@ -74,7 +74,8 @@ class OwnershipChallengeChecker
             $failures[] = $result->message;
         }
 
-        return new VerificationResult(false, VerificationMethod::DnsTxt, implode(' ', $failures));
+        // One short line per method, so pages can show them as a list.
+        return new VerificationResult(false, VerificationMethod::DnsTxt, implode("\n", $failures));
     }
 
     private function checkDnsTxt(string $domain, string $token): VerificationResult
@@ -87,7 +88,7 @@ class OwnershipChallengeChecker
             }
         }
 
-        return new VerificationResult(false, VerificationMethod::DnsTxt, 'DNS: token not found in a TXT record on '.self::DNS_PREFIX."{$domain} or {$domain} (DNS changes can take a few minutes).");
+        return new VerificationResult(false, VerificationMethod::DnsTxt, 'DNS TXT record: not found yet. New records can take a few minutes to appear.');
     }
 
     /**
@@ -97,7 +98,9 @@ class OwnershipChallengeChecker
     {
         $isMetaTag = $method === VerificationMethod::MetaTag;
         $paths = $isMetaTag ? ['/'] : self::FILE_PATHS;
-        $problems = [];
+        $answeredWithoutToken = false;
+        $httpStatuses = [];
+        $unreachable = false;
 
         foreach ($baseUrls as $baseUrl) {
             foreach ($paths as $path) {
@@ -105,7 +108,7 @@ class OwnershipChallengeChecker
                 $response = $this->fetch($url);
 
                 if (is_string($response)) {
-                    $problems[] = $response;
+                    $unreachable = true;
 
                     continue;
                 }
@@ -116,13 +119,22 @@ class OwnershipChallengeChecker
                     return new VerificationResult(true, $method, $isMetaTag ? "Meta tag matched on {$url}." : "Verification file matched at {$url}.");
                 }
 
-                $problems[] = $response->successful() ? "{$url} does not contain the token." : "{$url} returned HTTP {$response->status()}.";
+                $response->successful() ? $answeredWithoutToken = true : $httpStatuses[] = $response->status();
             }
         }
 
-        return new VerificationResult(false, $method, ($isMetaTag
-            ? 'Meta tag: <meta name="'.self::META_TAG_NAME.'" content="…"> not found on the homepage. '
-            : 'File: ').implode(' ', array_unique($problems)));
+        $label = $isMetaTag ? 'Meta tag' : 'Verification file';
+        $statuses = implode(', ', array_unique($httpStatuses));
+
+        return new VerificationResult(false, $method, $label.': '.match (true) {
+            $answeredWithoutToken && $isMetaTag => 'not found in the homepage <head>.',
+            $answeredWithoutToken => 'the file was found, but it does not contain your token.',
+            $httpStatuses !== [] && $isMetaTag => "the homepage returned HTTP {$statuses}.",
+            $httpStatuses !== [] && array_unique($httpStatuses) === [404] => 'not uploaded yet (404 Not Found).',
+            $httpStatuses !== [] => "the site returned HTTP {$statuses}.",
+            $unreachable => 'could not reach the site.',
+            default => 'not found.',
+        });
     }
 
     /**

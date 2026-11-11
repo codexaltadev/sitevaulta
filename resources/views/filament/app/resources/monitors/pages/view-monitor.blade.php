@@ -482,7 +482,10 @@
                                 <p class="sv-md-sub">Verify now tries all three — whichever you set up.</p>
                             </div>
                             @if ($pendingVerification->last_error)
-                                <p class="sv-md-sub" style="color:var(--sv-danger);">Last attempt {{ $pendingVerification->last_attempted_at?->diffForHumans() }}: {{ $pendingVerification->last_error }}</p>
+                                <div class="sv-md-sub" style="color:var(--sv-danger);">
+                                    <p style="margin:0 0 2px;font-weight:600;">Last attempt {{ $pendingVerification->last_attempted_at?->diffForHumans() }} — not found with:</p>
+                                    {{ $pendingVerification->errorListHtml() }}
+                                </div>
                             @endif
                             <button type="button" class="sv-md-btn is-primary" wire:click="verifyOwnership" wire:loading.attr="disabled" wire:target="verifyOwnership">
                                 <span wire:loading.remove wire:target="verifyOwnership">Verify now</span>

@@ -222,12 +222,33 @@ class HostOwnershipTest extends TestCase
     {
         $this->fakeDns();
         $domain = VerifiedDomain::create(['workspace_id' => $this->workspace->id, 'domain' => 'acme.example']);
-        Http::fake(['*' => Http::response('nothing here')]);
+        Http::fake([
+            'https://acme.example/' => Http::response('<html><head></head></html>'),
+            '*' => Http::response('Not found', 404),
+        ]);
 
         $this->assertFalse(app(HostOwnershipVerifier::class)->verify($domain));
-        $this->assertStringContainsString('DNS:', $domain->last_error);
-        $this->assertStringContainsString('File:', $domain->last_error);
-        $this->assertStringContainsString('Meta tag:', $domain->last_error);
+        $this->assertSame([
+            'DNS TXT record: not found yet. New records can take a few minutes to appear.',
+            'Verification file: not uploaded yet (404 Not Found).',
+            'Meta tag: not found in the homepage <head>.',
+        ], $domain->errorLines());
+    }
+
+    public function test_verified_domains_table_shows_a_short_status_and_the_details_as_a_list(): void
+    {
+        VerifiedDomain::factory()->create([
+            'workspace_id' => $this->workspace->id,
+            'domain' => 'acme.example',
+            'last_attempted_at' => now(),
+            'last_error' => "DNS TXT record: not found yet.\nVerification file: not uploaded yet (404 Not Found).",
+        ]);
+
+        $this->actingAs($this->user)
+            ->get("/app/{$this->workspace->slug}/verified-domains")
+            ->assertOk()
+            ->assertSee('Token not found yet — hover or open &quot;How to verify&quot;', false)
+            ->assertDontSee('DNS TXT record: not found yet. Verification file');
     }
 
     public function test_backup_website_verification_uses_the_same_checks(): void

@@ -14,6 +14,7 @@ use Filament\Notifications\Notification;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Support\HtmlString;
 
 class VerifiedDomainsTable
 {
@@ -33,9 +34,15 @@ class VerifiedDomainsTable
                     ->badge()
                     ->state(fn (VerifiedDomain $record): string => $record->isVerified() ? 'Verified' : 'Pending')
                     ->color(fn (string $state): string => $state === 'Verified' ? 'success' : 'warning')
-                    ->description(fn (VerifiedDomain $record): ?string => $record->isVerified()
-                        ? 'via '.$record->methodLabel().', '.$record->verified_at->diffForHumans()
-                        : $record->last_error),
+                    // A short line here; the per-method details are in the tooltip and the "How to verify" modal.
+                    ->description(fn (VerifiedDomain $record): ?string => match (true) {
+                        $record->isVerified() => 'via '.$record->methodLabel().', '.$record->verified_at->diffForHumans(),
+                        filled($record->last_error) => 'Token not found yet — hover or open "How to verify"',
+                        default => 'Add the token, then click "Verify now"',
+                    })
+                    ->tooltip(fn (VerifiedDomain $record): ?string => ! $record->isVerified() && filled($record->last_error)
+                        ? collect($record->errorLines())->map(fn (string $line): string => "✗ {$line}")->implode("\n")
+                        : null),
                 TextColumn::make('source')
                     ->label('Source')
                     ->badge()
@@ -58,6 +65,11 @@ class VerifiedDomainsTable
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close')
                     ->schema([
+                        TextEntry::make('last_result')
+                            ->label(fn (VerifiedDomain $record): string => 'Last attempt '.($record->last_attempted_at?->diffForHumans() ?? '').' — not found with:')
+                            ->state(fn (VerifiedDomain $record): HtmlString => $record->errorListHtml())
+                            ->color('danger')
+                            ->visible(fn (VerifiedDomain $record): bool => ! $record->isVerified() && filled($record->last_error)),
                         TextEntry::make('dns')
                             ->label('Option 1 — DNS TXT record (recommended)')
                             ->state(fn (VerifiedDomain $record): string => "Name: {$record->dnsRecordName()}   ·   Type: TXT   ·   Value: {$record->token}")
@@ -92,7 +104,7 @@ class VerifiedDomainsTable
                         $notification = Notification::make()->title($verified ? "{$record->domain} is verified" : 'Verification failed');
                         $verified
                             ? $notification->success()->body('You can now run port checks on this domain.')
-                            : $notification->danger()->body($record->last_error.' DNS changes can take a few minutes to appear.');
+                            : $notification->danger()->body($record->errorListHtml());
                         $notification->send();
                     }),
                 // Managed from Backup Management: it disappears when the website loses verification or is deleted.
